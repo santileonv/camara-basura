@@ -1,0 +1,10 @@
+.history{margin-top:22px;min-width:0}
+.history .sectionTitle p{margin:0}
+.tableScroll{overflow-x:auto;max-width:100%;margin-top:14px}
+.history table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+.history th,.history td{padding:13px 12px;text-align:right;border-bottom:1px solid #e5ece5}
+.history th{background:#f4f7f2;font-size:11px;font-weight:650}
+.history th:first-child,.history td:first-child,.history th:nth-child(2),.history td:nth-child(2){text-align:left}
+.historyActions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.historyActions button{font-size:12px}
+.history button:disabled{cursor:default}

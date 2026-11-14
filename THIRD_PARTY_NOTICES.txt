@@ -1,0 +1,14 @@
+Este proyecto conserva el modelo entrenado por el usuario en Teachable Machine,
+con una base MobileNet de TensorFlow y el archivo de licencia Apache 2.0.
+
+Dependencias instaladas con npm (node_modules no se incluye en el ZIP):
+- pg 8.23.1: MIT, https://github.com/brianc/node-postgres
+- TensorFlow.js 4.22.0: Apache-2.0, https://github.com/tensorflow/tfjs
+- Sharp 0.35.5: Apache-2.0, https://github.com/lovell/sharp
+Sus dependencias y binarios mantienen sus propias licencias y avisos.
+
+Dependencia de desarrollo: @electric-sql/pglite 0.5.16, Apache-2.0,
+https://github.com/electric-sql/pglite. Incluye PostgreSQL con su propia licencia.
+
+certificados.h contiene certificados raiz publicos de ISRG, Google Trust
+Services y DigiCert. No contiene claves privadas ni credenciales del usuario.
