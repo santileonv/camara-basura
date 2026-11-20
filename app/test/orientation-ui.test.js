@@ -46,8 +46,8 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
   };
   const context = vm.createContext({ document, fetch, AbortController, AbortSignal, URL, URLSearchParams, Blob,
     setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id),
-    setInterval() {}, historyCSV() {} });
-  const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/^import \{ historyCSV \} from '\.\/history-format\.js';\n/m, '');
+    setInterval() {}, historyCSV() {}, createCharts: () => ({ start() {}, stop() {} }) });
+  const source = (await readFile(new URL('../public/app.js', import.meta.url), 'utf8')).replace(/^import .*;\n/gm, '');
   vm.runInContext(source, context); await settle();
   assert.equal(get('rotateCamera').disabled, false);
   assert.match(get('rotateCamera').textContent, /Invertir/);

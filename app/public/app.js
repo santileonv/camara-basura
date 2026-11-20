@@ -1,6 +1,8 @@
 'use strict';
 import { historyCSV } from './history-format.js';
+import { createCharts } from './charts.js';
 const $ = id => document.getElementById(id);
+const charts = createCharts({ onUnauthorized: () => signedIn(false) });
 const labels = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas'];
 const rows = labels.map(label => {
   const row = document.createElement('div'); row.className = 'classRow';
@@ -20,6 +22,7 @@ function signedIn(value) {
   authenticated = value; $('login').hidden = value; $('dashboard').hidden = !value; $('logout').hidden = !value;
   $('exportJSON').disabled = !value || jsonBusy;
   $('rotateCamera').disabled = !value || !cameraKnown || cameraBusy;
+  if (value) charts.start(); else charts.stop();
   if (!value) {
     clearTimeout(timer); last = null; sessionEpoch++;
     exportController?.abort();

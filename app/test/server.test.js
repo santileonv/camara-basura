@@ -8,6 +8,7 @@ import { createStore } from '../lib/store.js';
 import { createIngestHandler } from '../api/ingest.js';
 import { createStateHandler } from '../api/state.js';
 import { createHistoryHandler } from '../api/history.js';
+import { createChartHistoryHandler } from '../api/chart-history.js';
 import login from '../api/login.js';
 import logout from '../api/logout.js';
 import { classify } from '../lib/model.js';
@@ -24,6 +25,7 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     let healthy = true;
     const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading,store.readCameraSettings),
       '/api/state':createStateHandler(store.readCameraView),'/api/history':createHistoryHandler(store.readHistory),
+      '/api/chart-history':createChartHistoryHandler(store.readChartHistory),
       '/api/login':login,'/api/logout':logout};
     app=createServer({routes,health:async()=>{if(!healthy)throw new Error('test-health');await db.query('SELECT 1');}});
     await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});
@@ -35,6 +37,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     for(const path of ['/model/weights.bin','/.env','/server.js','/../package.json'])assert.equal((await request(path)).status,404);
     assert.equal((await request('/api/state')).status,401);
     assert.equal((await request('/api/history')).status,401);
+    assert.equal((await request('/api/chart-history')).status,401);
+    for(const path of ['/charts.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
     const logged=await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:process.env.DASHBOARD_PASSWORD})});
     assert.equal(logged.status,200);
@@ -50,6 +54,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
     const history=await(await request('/api/history?limit=2',{headers:{cookie}})).json();
     assert.equal(history.entries.length,2);assert.ok(history.nextCursor);
+    const graph=await(await request('/api/chart-history?minutes=15',{headers:{cookie}})).json();
+    assert.equal(graph.entries.length,5);assert.equal(graph.entries[0].scores.length,4);
     assert.equal(Number((await db.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),5);
     healthy=false;assert.equal((await request('/healthz')).status,503);
     assert.equal((await request('/api/logout',{method:'POST',headers:{cookie}})).status,200);
