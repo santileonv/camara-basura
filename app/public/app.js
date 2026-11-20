@@ -13,11 +13,14 @@ const rows = labels.map(label => {
 });
 let authenticated = false, timer, busy = false, last = null, staleMs = 90000;
 let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false, sessionEpoch = 0;
+let jsonBusy = false, exportController;
 const percent = value => (100 * value).toFixed(1) + ' %';
 function signedIn(value) {
   authenticated = value; $('login').hidden = value; $('dashboard').hidden = !value; $('logout').hidden = !value;
+  $('exportJSON').disabled = !value || jsonBusy;
   if (!value) {
     clearTimeout(timer); last = null; sessionEpoch++;
+    exportController?.abort();
     historyEntries = []; historyCursor = null; historyLoaded = false;
     $('historyRows').replaceChildren(); $('exportHistory').disabled = true;
   }
@@ -101,6 +104,32 @@ async function loadHistory(reset = false) {
 }
 $('refreshHistory').onclick = () => loadHistory(true);
 $('moreHistory').onclick = () => loadHistory(false);
+$('exportJSON').onclick = async () => {
+  if (!authenticated || jsonBusy) return;
+  const epoch = sessionEpoch;
+  const controller = new AbortController(); exportController = controller;
+  jsonBusy = true; $('exportJSON').disabled = true;
+  $('exportStatus').textContent = 'Preparando todas las mediciones…';
+  try {
+    const response = await fetch('/api/export.json', { cache: 'no-store', signal: controller.signal });
+    if (response.status === 401) { signedIn(false); return; }
+    if (!response.ok) {
+      const data = await response.json(); throw new Error(data.error || 'No se pudo exportar.');
+    }
+    const blob = await response.blob();
+    if (epoch !== sessionEpoch || !authenticated) return;
+    const url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = 'mediciones-xiao-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $('exportStatus').textContent = 'Archivo preparado con todas las mediciones de la instantánea.';
+  } catch (error) {
+    if (!controller.signal.aborted && epoch === sessionEpoch && authenticated)
+      $('exportStatus').textContent = error.message || 'La descarga se interrumpió. Intenta nuevamente.';
+  } finally {
+    jsonBusy = false; exportController = undefined; $('exportJSON').disabled = !authenticated;
+  }
+};
 $('exportHistory').onclick = () => {
   if (!authenticated || !historyEntries.length) return;
   const url = URL.createObjectURL(new Blob([historyCSV(historyEntries)], { type: 'text/csv;charset=utf-8' }));

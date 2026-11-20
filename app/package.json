@@ -1,6 +1,6 @@
 {
   "name": "xiao-railway-remoto",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "engines": { "node": "22.x" },
@@ -11,7 +11,8 @@
     "check-model": "node scripts/check-model.js",
     "secrets": "node scripts/secrets.js",
     "db:migrate": "node scripts/migrate.js",
-    "db:import": "node scripts/import-history.js"
+    "db:import": "node scripts/import-history.js",
+    "db:copy-to-aiven": "node scripts/copy-to-aiven.js"
   },
   "dependencies": {
     "@tensorflow/tfjs": "4.22.0",

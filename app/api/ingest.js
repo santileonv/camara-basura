@@ -8,6 +8,7 @@ return async function handler(req, res) {
   try {
     if (req.method !== 'POST') return reply(res, 405, { error: 'Usa POST.' });
     if (!cameraAuthorized(req)) return reply(res, 401, { error: 'Token de camara incorrecto.' });
+    if (process.env.INGEST_PAUSED === 'true') return reply(res, 503, { error: 'Recepcion pausada por mantenimiento. Se conserva el historial.' });
     if (!/^(?:image\/jpeg|application\/octet-stream)(?:;|$)/i.test(req.headers['content-type'] || '')) return reply(res, 415, { error: 'Envio JPEG requerido.' });
     const boot = req.headers['x-camera-boot'], seqText = req.headers['x-frame-seq'];
     if (!/^[a-f0-9]{16}$/.test(boot || '') || !/^\d{1,10}$/.test(seqText || '')) return reply(res, 400, { error: 'Identificador de captura invalido.' });
