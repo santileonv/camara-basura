@@ -1,9 +1,9 @@
 import { cameraAuthorized } from '../lib/auth.js';
 import { body, reply, settings } from '../lib/config.js';
 import { classify } from '../lib/model.js';
-import { saveReading } from '../lib/store.js';
+import { saveReading, readCameraSettings } from '../lib/store.js';
 
-export function createIngestHandler(analyze = classify, save = saveReading) {
+export function createIngestHandler(analyze = classify, save = saveReading, readCamera = readCameraSettings) {
 return async function handler(req, res) {
   try {
     if (req.method !== 'POST') return reply(res, 405, { error: 'Usa POST.' });
@@ -15,8 +15,10 @@ return async function handler(req, res) {
     const receivedAt = Date.now();
     const jpeg = await body(req, 1000000);
     if (jpeg.length < 4 || jpeg[0] !== 255 || jpeg[1] !== 216) return reply(res, 415, { error: 'JPEG invalido.' });
-    const result = await analyze(jpeg);
-    const state = await save({ ...result, boot, seq: Number(seqText), receivedAt }, settings());
+    const camera = await readCamera();
+    const result = await analyze(jpeg, { rotation: camera.rotation });
+    const state = await save({ ...result, boot, seq: Number(seqText), receivedAt,
+      rotation: camera.rotation, orientationVersion: camera.version }, settings());
     return reply(res, 200, { ok: true, conclusion: state.conclusion, analysisMs: result.analysisMs });
   } catch (error) {
     console.error('ingest:', error.code || error.name);

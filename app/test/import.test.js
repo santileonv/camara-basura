@@ -14,13 +14,15 @@ test('Importacion PostgreSQL conserva datos, ids y estado; rechaza destinos ocup
     const frame = seq => ({ boot:'0123456789abcdef', seq, receivedAt:1700000000000+seq*15000,
       scores:[.05,.45,.4,.1],preview:'miniatura',analysisMs:120 });
     const config = { threshold:.8,staleMs:90000 };
+    await store(source).setOrientation(180, '0');
     // Mas de un lote: verifica paginacion de la copia y continuidad de identidad.
-    for(let i=1;i<=253;i++) await store(source).saveReading(frame(i),config);
+    for(let i=1;i<=253;i++) await store(source).saveReading({...frame(i),rotation:180,orientationVersion:'1'},config);
     const result = await importHistory(source,target);
     assert.deepEqual(result,{cameras:1,measurements:253,states:1});
     assert.deepEqual(await store(target).readState(),await store(source).readState());
+    assert.deepEqual(await store(target).readCameraSettings(),{rotation:180,version:'1'});
     assert.deepEqual(await target.query('SELECT * FROM mediciones ORDER BY id'),await source.query('SELECT * FROM mediciones ORDER BY id'));
-    await store(target).saveReading(frame(254),config);
+    await store(target).saveReading({...frame(254),rotation:180,orientationVersion:'1'},config);
     assert.equal((await store(target).readHistory()).entries[0].id,'254');
     await assert.rejects(importHistory(source,target),/destino ya contiene/);
     assert.equal(Number((await target.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),254);

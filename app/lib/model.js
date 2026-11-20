@@ -31,19 +31,26 @@ export async function loadModel() {
 }
 // Serializar inferencias dentro de una instancia evita solapar tensores y cargas CPU.
 let tail = Promise.resolve();
-export function classify(jpeg) {
-  const task = tail.then(() => infer(jpeg)); tail = task.catch(() => {}); return task;
+export function classify(jpeg, { rotation = 0 } = {}) {
+  const task = tail.then(() => infer(jpeg, rotation)); tail = task.catch(() => {}); return task;
 }
-async function infer(jpeg) {
-  const start = performance.now(), model = await loadModel();
+// La miniatura y los pixeles del modelo parten de la misma imagen orientada.
+export async function prepareImage(jpeg, rotation = 0) {
+  if (![0, 180].includes(rotation)) throw new Error('Orientacion invalida.');
   const image = sharp(jpeg, { limitInputPixels: 16000000, failOn: 'warning' });
   const meta = await image.metadata();
   if (meta.format !== 'jpeg' || !meta.width || !meta.height) throw Object.assign(new Error('Se requiere una foto JPEG valida.'), { status: 415 });
+  image.rotate(rotation);
   const size = Math.min(meta.width, meta.height);
-  const { data } = await image.extract({ left: Math.floor((meta.width - size) / 2), top: Math.floor((meta.height - size) / 2), width: size, height: size })
+  const { data } = await image.clone().extract({ left: Math.floor((meta.width - size) / 2), top: Math.floor((meta.height - size) / 2), width: size, height: size })
     .resize(224, 224, { kernel: 'linear' }).removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
-  const scores = await predictRGB(data, model);
-  const preview = await sharp(jpeg).resize({ width: 320, withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
+  const preview = await image.clone().resize({ width: 320, withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
+  return { rgb: data, preview };
+}
+async function infer(jpeg, rotation) {
+  const start = performance.now(), model = await loadModel();
+  const { rgb, preview } = await prepareImage(jpeg, rotation);
+  const scores = await predictRGB(rgb, model);
   return { scores, preview: preview.toString('base64'), analysisMs: Math.round(performance.now() - start) };
 }
 export async function predictRGB(rgb, model = null) {
