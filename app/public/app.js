@@ -49,13 +49,28 @@ function render() {
   const conclusion = pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
-  $('detail').textContent = pending ? 'El giro está guardado. La conclusión se actualizará con las próximas capturas.' : (fresh ? (last.streak >= 3 ? 'Resultado confirmado con tres evaluaciones consecutivas.' : 'Reuniendo capturas y confirmaciones para una decisión estable.') : 'Revisa que la XIAO tenga alimentación, Wi-Fi e Internet.');
-  $('total').textContent = fresh ? percent(last.trashAverage) : '—';
-  $('totalFill').style.width = fresh ? last.trashAverage * 100 + '%' : '0%';
+  const ambiguous = fresh && last.readings >= 3 && last.trashAverage < last.threshold && 1 - last.trashAverage < last.threshold;
+  $('detail').textContent = pending ? 'El giro está guardado. La conclusión se actualizará con las próximas capturas.' : (fresh ?
+    (ambiguous ? 'La evidencia es ambigua: el promedio de basura está entre los dos umbrales de decisión.' :
+      (last.streak >= 3 ? 'Resultado confirmado con tres evaluaciones consecutivas.' : 'Reuniendo capturas y confirmaciones para una decisión estable.')) :
+    'Revisa que la XIAO tenga alimentación, Wi-Fi e Internet.');
+  // La barra expresa confianza en la conclusion mostrada. La suma de basura
+  // se mantiene separada: para "Sin basura" usamos su complemento.
+  const confidence = fresh && conclusion === 'Hay basura' ? last.trashAverage :
+    (fresh && conclusion === 'Sin basura' ? 1 - last.trashAverage : null);
+  $('confidenceLabel').textContent = confidence === null ? 'Confianza estimada en la conclusión' :
+    (conclusion === 'Hay basura' ? 'Confianza de que hay basura' : 'Confianza de que no hay basura');
+  $('total').textContent = confidence === null ? '—' : percent(confidence);
+  $('confidenceBar').hidden = confidence === null;
+  $('totalFill').style.width = confidence === null ? '0%' : confidence * 100 + '%';
+  $('confidenceHelp').textContent = confidence === null ? 'El porcentaje aparecerá cuando haya una conclusión confirmada.' :
+    'Confianza estimada del modelo, calculada con el promedio de las últimas capturas.';
   $('now').textContent = fresh ? percent(last.trashNow) : '—';
+  $('trashAverage').textContent = fresh ? percent(last.trashAverage) : '—';
+  $('averageLabel').textContent = fresh ? `Promedio de basura · ${last.readings} ${last.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de basura de las últimas capturas';
   rows.forEach((row, i) => { row.value.textContent = fresh ? percent(last.scores[i]) : '—'; row.fill.style.width = fresh ? last.scores[i] * 100 + '%' : '0%'; });
   $('window').textContent = pending ? 'El promedio empezará de nuevo con la orientación elegida.' : (fresh ? `Promedio de ${last.readings}/5 capturas · Confirmación ${last.streak}/3` : 'La lectura anterior no se presenta como una medición actual.');
-  $('threshold').textContent = last ? 'Umbral de decisión: ' + percent(last.threshold) : '';
+  $('threshold').textContent = last ? `Sobre el promedio: Hay basura ≥ ${percent(last.threshold)} · Sin basura ≤ ${percent(1 - last.threshold)}. Entre ambos: No seguro.` : '';
   $('received').textContent = last ? new Date(last.receivedAt).toLocaleString('es-CL') : '—';
   $('analysis').textContent = last ? last.analysisMs + ' ms' : '—';
 }

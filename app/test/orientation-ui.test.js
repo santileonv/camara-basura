@@ -51,6 +51,33 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
   vm.runInContext(source, context); await settle();
   assert.equal(get('rotateCamera').disabled, false);
   assert.match(get('rotateCamera').textContent, /Invertir/);
+  assert.equal(get('total').textContent, '95.0 %');
+  assert.equal(get('confidenceLabel').textContent, 'Confianza de que hay basura');
+  assert.equal(get('confidenceBar').hidden, false);
+  assert.equal(get('trashAverage').textContent, '95.0 %');
+  // El porcentaje principal debe referirse al resultado, no siempre a basura.
+  reading = { ...reading, conclusion:'Sin basura', trashNow:.02, trashAverage:.1, scores:[.98,.01,.005,.005] };
+  await vm.runInContext('poll()', context);
+  assert.equal(get('total').textContent, '90.0 %');
+  assert.equal(get('totalFill').style.width, '90%');
+  assert.equal(get('confidenceLabel').textContent, 'Confianza de que no hay basura');
+  assert.equal(get('trashAverage').textContent, '10.0 %');
+  assert.equal(get('now').textContent, '2.0 %');
+  reading = { ...reading, conclusion:'No seguro', trashNow:.3, trashAverage:.238, streak:0 };
+  await vm.runInContext('poll()', context);
+  assert.equal(get('total').textContent, '—');
+  assert.equal(get('confidenceBar').hidden, true);
+  assert.equal(get('trashAverage').textContent, '23.8 %');
+  assert.match(get('confidenceHelp').textContent, /conclusión confirmada/);
+  assert.match(get('detail').textContent, /evidencia es ambigua/);
+  reading = { ...reading, receivedAt:Date.now() - 100000, conclusion:'Sin basura',trashAverage:.1,streak:3 };
+  await vm.runInContext('poll()', context);
+  assert.equal(get('conclusion').textContent, 'Sin datos recientes');
+  assert.equal(get('total').textContent, '—');
+  assert.equal(get('confidenceBar').hidden, true);
+  assert.equal(get('trashAverage').textContent, '—');
+  reading = { ...reading, receivedAt:Date.now(), conclusion:'Hay basura', trashNow:.95, trashAverage:.95, streak:3 };
+  await vm.runInContext('poll()', context);
   // Una consulta iniciada antes de guardar el giro responde despues del cambio.
   delayPoll = true; const latePoll = vm.runInContext('poll()', context); await settle();
   await get('rotateCamera').onclick();
@@ -67,7 +94,9 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
   await vm.runInContext('poll()', context);
   assert.equal(get('photo').classList.contains('upsideDown'), false);
   assert.equal(get('conclusion').textContent, 'No seguro');
-  assert.equal(get('total').textContent, '95.0 %');
+  assert.equal(get('total').textContent, '—');
+  assert.equal(get('confidenceBar').hidden, true);
+  assert.equal(get('trashAverage').textContent, '95.0 %');
   failChange = true; await get('rotateCamera').onclick();
   assert.match(get('cameraError').textContent, /No se pudo/);
   assert.equal(get('rotateCamera').getAttribute('aria-pressed'), 'true');
