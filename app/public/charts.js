@@ -1,4 +1,4 @@
-import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath, historyDomain, windowAtOffset } from './chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath, windowAtOffset, localDayKey, localDayBounds, clampDayWindow } from './chart-data.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const pct = value => (100 * value).toFixed(1) + ' %';
@@ -17,30 +17,49 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   let request = null, timer, resizeTimer, skew = 0, lastUpdated = null, limited = false, error = '';
   let selectedId = null, probability = null, spans = [], context = null;
   let live = true, viewEnd = null, earliest = null, navigationTimer, loaded = false;
+  let selectedDay = localDayKey(Date.now()), fullDay = false, cache = null;
+  const presetButtons = [...document.querySelectorAll('[data-chart-minutes]')];
   const scrollers = [...document.querySelectorAll('.historyScroller')];
   const positions = new WeakMap();
   const currentTime = () => Date.now() + skew;
-  const domain = () => historyDomain(earliest, currentTime(), duration);
-
-  function bounds() { const to = live ? currentTime() : viewEnd; return { from:Math.max(0, to - duration), to }; }
+  const domain = () => {
+    if (live) selectedDay = localDayKey(currentTime());
+    return localDayBounds(selectedDay);
+  };
+  function bounds() {
+    const day = domain();
+    return fullDay ? day : clampDayWindow(day, duration, live ? currentTime() : viewEnd ?? day.to);
+  }
   function syncNavigation() {
-    const extent = domain(), view = bounds();
-    const span = extent.to - extent.from, travel = Math.max(0, span - duration);
-    const fraction = travel ? Math.max(0, Math.min(1, (view.from - extent.from) / travel)) : 1;
+    const extent = domain(), view = bounds(), span = extent.to - extent.from;
+    const visible = view.to - view.from, travel = Math.max(0, span - visible);
+    const fraction = travel ? Math.max(0, Math.min(1, (view.from - extent.from) / travel)) : 0;
     for (const bar of scrollers) {
       const width = bar.clientWidth || 800;
-      bar.firstElementChild.style.width = Math.min(8000000, Math.max(width + 1, width * span / duration)) + 'px';
+      bar.firstElementChild.style.width = Math.max(width, width * span / visible) + 'px';
       const offset = fraction * (bar.scrollWidth - bar.clientWidth);
       positions.set(bar, offset);
       if (Math.abs(bar.scrollLeft - offset) > .75) bar.scrollLeft = offset;
-      bar.setAttribute('aria-label', `Desplazar historial de ${date(extent.from)} a ${date(extent.to)}. Izquierda: más antiguo. Derecha: más reciente.`);
+      bar.tabIndex = travel ? 0 : -1;
+      bar.setAttribute('aria-disabled', String(!travel));
+      bar.setAttribute('aria-label', `Recorrer el ${selectedDay}, de 00:00 a 24:00. ${travel ? 'Arrastra para cambiar de hora.' : 'Día completo visible. Elige un intervalo menor para desplazarte.'}`);
     }
-    for (const label of document.querySelectorAll('.historyStart')) label.textContent = earliest === null ? 'Sin mediciones guardadas' : 'Inicio: ' + date(earliest);
-    $('chartMode').textContent = live ? '● En vivo · sigue las capturas nuevas' : 'Historial · vista fija';
+    for (const label of document.querySelectorAll('.historyStart')) label.textContent = '00:00';
+    for (const label of document.querySelectorAll('.historyEnd')) label.textContent = '24:00';
+    $('chartDate').value = selectedDay;
+    $('chartDate').max = localDayKey(currentTime());
+    $('chartDate').min = earliest === null ? '' : localDayKey(earliest);
+    $('previousChartDay').disabled = earliest !== null && selectedDay <= localDayKey(earliest);
+    $('nextChartDay').disabled = selectedDay >= localDayKey(currentTime());
+    for (const button of presetButtons) button.setAttribute('aria-pressed', String(
+      Number(button.dataset.chartMinutes) === 1440 ? fullDay : !fullDay && duration === Number(button.dataset.chartMinutes) * 60000));
+    $('chartMode').textContent = live ? '● En vivo · hoy' : 'Historial · ' + new Date(extent.from).toLocaleDateString('es-CL', {day:'numeric',month:'long',year:'numeric'});
     $('liveCharts').setAttribute('aria-pressed', String(live));
-    $('chartRange').textContent = `${date(view.from)} — ${date(view.to)}`;
-    $('zoomInCharts').disabled = duration <= 60000;
-    $('zoomOutCharts').disabled = duration >= Math.max(60000, currentTime() - (earliest ?? currentTime() - duration));
+    const endLabel = view.to === extent.to ? '24:00' : time(view.to);
+    const durationLabel = fullDay ? 'Día completo' + (span !== 86400000 ? ` (${span / 3600000} h por cambio de hora)` : '') : Math.round(visible / 60000 * 10) / 10 + ' min';
+    $('chartRange').textContent = `Viendo ${time(view.from)} — ${endLabel} · ${durationLabel}`;
+    $('zoomInCharts').disabled = visible <= 60000;
+    $('zoomOutCharts').disabled = visible >= span;
   }
   function frame(id, from, to, binary = false) {
     const svg = $(id), width = Math.max(300, svg.getBoundingClientRect().width || 800);
@@ -50,11 +69,11 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.append(node('title', {}, svg.getAttribute('aria-label')));
     svg.append(node('text', { x:binary ? 8 : left, y:16, class:'chartAxisTitle' }, binary ? 'Conclusión' : 'Probabilidad de basura (%)'));
-    const withDate = new Date(from).toDateString() !== new Date(to).toDateString();
+    const withDate = new Date(from).toDateString() !== new Date(to - 1).toDateString();
     const ticks = width < 450 ? (withDate ? 2 : 3) : 5;
     for (let i = 0; i < ticks; i++) {
       const stamp = from + (to - from) * i / (ticks - 1);
-      const label = (withDate ? new Date(stamp).toLocaleDateString('es-CL', { day:'2-digit',month:'2-digit' }) + ' ' : '') + time(stamp);
+      const label = stamp === domain().to ? '24:00' : (withDate ? new Date(stamp).toLocaleDateString('es-CL', { day:'2-digit',month:'2-digit' }) + ' ' : '') + time(stamp);
       svg.append(node('text', { x:x(stamp), y:bottom + 22, 'text-anchor':i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle', class:'chartAxis' }, label));
     }
     svg.append(node('text', { x:(left + right) / 2, y:height - 7, 'text-anchor':'middle', class:'chartAxisTitle' }, 'Hora de la medición'));
@@ -65,6 +84,13 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       ref.svg.append(node('line', { x1:ref.left, x2:ref.right, y1:ref.y(value), y2:ref.y(value), class:'chartGrid' }));
       ref.svg.append(node('text', { x:ref.left - 10, y:ref.y(value) + 4, 'text-anchor':'end', class:binary ? 'decisionAxis ' + (value ? 'hasTrash' : 'noTrash') : 'chartAxis' }, binary ? (value ? 'Hay basura' : 'Sin basura') : Math.round(value * 100) + '%'));
     }
+  }
+  function shadeFuture(ref) {
+    const present = currentTime();
+    if (ref.to <= present) return;
+    const start = Math.max(ref.from, present), width = ref.x(ref.to) - ref.x(start);
+    ref.svg.append(node('rect', { x:ref.x(start), y:ref.top, width, height:ref.bottom - ref.top, fill:'#edf2f8' }));
+    if (width > 100) ref.svg.append(node('text', { x:ref.x(start) + width / 2, y:ref.top + 19, 'text-anchor':'middle', class:'chartFutureLabel' }, 'Horas futuras'));
   }
   function addSeries(ref, segments, value, color, thick = 2, dashed = false) {
     if (!segments.length) return;
@@ -120,6 +146,11 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     };
   }
   function showDecision(stamp) {
+    if (stamp > currentTime()) {
+      $('stepState').textContent = 'Aún no ocurre'; $('stepState').className = 'decisionTag future';
+      $('stepTime').textContent = date(stamp);
+      $('stepTooltip').textContent = 'Esta hora aún no ha ocurrido. No hay una conclusión disponible.'; return;
+    }
     const span = spans.find(item => stamp >= item.from && stamp < item.to);
     const label = !span ? 'Sin datos recientes' : span.conclusion === 'No seguro' ? 'Sin confirmar' : span.conclusion;
     $('stepState').textContent = label;
@@ -133,6 +164,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     pattern.append(node('rect', { width:8, height:8, fill:'#f4f6f2' }), node('path', { d:'M0,8L8,0', stroke:'#dbe4dc', 'stroke-width':1 })); defs.append(pattern); ref.svg.append(defs);
     ref.svg.append(node('rect', { x:ref.left, y:ref.top, width:ref.right - ref.left, height:ref.bottom - ref.top, fill:'url(#noDataPattern)' }));
     for (const span of spans) ref.svg.append(node('rect', { x:ref.x(span.from), y:ref.top, width:ref.x(span.to) - ref.x(span.from), height:ref.bottom - ref.top, fill:span.conclusion === 'No seguro' ? '#fff1d6' : 'white' }));
+    shadeFuture(ref);
     grid(ref, true);
     const runs = decisionStepSegments(spans);
     ref.svg.append(node('path', { d:decisionStepPath(runs, ref.x, ref.y), class:'decisionLine', fill:'none' }));
@@ -141,7 +173,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     const marker = node('line', { y1:ref.top, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(marker);
     const inspect = stamp => { showDecision(stamp); marker.setAttribute('visibility', 'visible'); marker.setAttribute('x1', ref.x(stamp)); marker.setAttribute('x2', ref.x(stamp)); };
     ref.svg.onpointermove = event => inspect(timestampAt(event, ref)); ref.svg.onpointerdown = ref.svg.onpointermove;
-    ref.svg.onpointerleave = () => { marker.setAttribute('visibility', 'hidden'); showDecision(to - 1); };
+    ref.svg.onpointerleave = () => { marker.setAttribute('visibility', 'hidden'); showDecision(Math.max(from, Math.min(to - 1, currentTime() - 1))); };
     ref.svg.onpointerenter = () => marker.setAttribute('visibility', 'visible');
     let index = spans.length - 1;
     ref.svg.onkeydown = event => {
@@ -149,16 +181,16 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       event.preventDefault(); index = event.key === 'Home' ? 0 : event.key === 'End' ? spans.length - 1 : Math.max(0, Math.min(spans.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
       marker.setAttribute('visibility', 'visible'); inspect((spans[index].from + spans[index].to) / 2);
     };
-    marker.setAttribute('visibility', 'hidden'); showDecision(to - 1);
+    marker.setAttribute('visibility', 'hidden'); showDecision(Math.max(from, Math.min(to - 1, currentTime() - 1)));
     $('stepEmpty').hidden = !entries.length || runs.length > 0;
   }
   function render() {
     if (!active) return;
     const { from, to } = bounds(); entries = mergeChartEntries(entries, [], from, to);
-    spans = conclusionSpans(context ? [context, ...entries] : entries, from, to, staleMs); drawDecision(from, to);
+    spans = conclusionSpans(context ? [context, ...entries] : entries, from, Math.min(to, currentTime()), staleMs); drawDecision(from, to);
     const segments = lineSegments(entries, staleMs);
     probability = frame('detectionChart', from, to);
-    shadeThresholds(probability, segments); grid(probability);
+    shadeThresholds(probability, segments); shadeFuture(probability); grid(probability);
     addSeries(probability, segments, row => row.threshold, '#c66742', 1.3, true);
     addSeries(probability, segments, row => 1 - row.threshold, '#258263', 1.3, true);
     if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
@@ -166,21 +198,44 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     mark(probability); interactProbability(probability); selection();
     $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? 'Actualización en vivo cada 15 s' : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Consultando mediciones…');
     $('chartStatus').classList.toggle('chartFailure', !!error);
+    $('chartEmpty').textContent = from >= currentTime() ? 'Este tramo de hoy aún no ocurre. Desplaza la barra hacia una hora anterior o vuelve al vivo.' : 'No hay mediciones en este tramo. Prueba otra hora, otro intervalo o una fecha distinta.';
     $('chartEmpty').hidden = entries.length > 0 || !lastUpdated || !!error;
     syncNavigation();
   }
 
+  function applyData(data, fromCache = false) {
+    if (!fromCache) skew = data.now - Date.now();
+    staleMs = data.staleMs; cursor = data.cursor;
+    if ('earliestAt' in data) earliest = data.earliestAt;
+    const view = bounds();
+    // El fin del dia es exclusivo: una captura de las 00:00 pertenece al dia siguiente.
+    const incoming = mergeChartEntries(entries, data.entries, data.from, data.to).filter(row => row.receivedAt < domain().to);
+    context = [...(data.context ? [data.context] : []), ...incoming.filter(row => row.receivedAt < view.from)].at(-1) ?? null;
+    limited = limited || data.truncated || entries.length + data.entries.length > 6000;
+    entries = mergeChartEntries(incoming, [], view.from, view.to);
+    if (earliest === null && entries.length) earliest = entries[0].receivedAt;
+    loaded = true; lastUpdated = data.now; error = ''; render();
+  }
   async function refresh(reset = false) {
     clearTimeout(timer);
     if (!active || document.hidden || (request && !reset)) return;
-    if (reset) { request?.abort(); entries = []; context = null; cursor = null; lastUpdated = null; selectedId = null; limited = false; error = ''; loaded = false; render(); }
+    if (reset) {
+      const old = request; request = null; old?.abort();
+      entries = []; context = null; cursor = null; lastUpdated = null; selectedId = null; limited = false; error = ''; loaded = false; render();
+    }
+    const view = bounds(), queryTo = Math.min(view.to, currentTime());
+    // Las horas futuras se muestran vacias y no se envian como fechas futuras a la API.
+    if (view.from >= queryTo) {
+      entries = []; context = null; loaded = true; lastUpdated = currentTime(); error = ''; render();
+      if (live) timer = setTimeout(refresh, 15000); return;
+    }
+    // Reusar un dia ya consultado permite desplazarse y acercar sin repetir consultas.
+    if (!live && cache && view.from >= cache.from && queryTo <= cache.to) { applyData(cache, true); return; }
     const controller = new AbortController(); request = controller;
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
-      const view = bounds();
-      // La primera consulta obtiene la hora del servidor, aunque el reloj del PC este adelantado.
       const params = new URLSearchParams(earliest === null && live && !loaded ?
-        { minutes:String(duration / 60000) } : { from:String(Math.floor(view.from)), to:String(Math.floor(view.to)) });
+        { minutes:String((fullDay ? 1440 : duration / 60000)) } : { from:String(Math.floor(view.from)), to:String(Math.floor(queryTo)) });
       if (live && loaded && cursor !== null) params.set('after', cursor);
       const response = await fetch('/api/chart-history?' + params, { cache:'no-store', signal:controller.signal });
       if (request !== controller || !active) return;
@@ -188,13 +243,8 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       const data = await response.json();
       if (request !== controller || !active) return;
       if (!response.ok) throw new Error(data.error || 'No se pudieron consultar los gráficos.');
-      skew = data.now - Date.now(); staleMs = data.staleMs; cursor = data.cursor;
-      if ('earliestAt' in data) earliest = data.earliestAt;
-      context = data.context;
-      limited = limited || data.truncated || entries.length + data.entries.length > 6000;
-      entries = mergeChartEntries(entries, data.entries, data.from, data.to);
-      if (earliest === null && entries.length) earliest = entries[0].receivedAt;
-      loaded = true; lastUpdated = data.now; error = ''; render();
+      if (!live && !data.truncated && (!cache || data.from < cache.from || data.to > cache.to)) cache = data;
+      applyData(data);
     } catch (cause) {
       if (request !== controller || !active) return;
       error = 'No se pudieron actualizar los gráficos. ' + (entries.length ? 'Se conservan los datos anteriores.' : 'Pulsa Actualizar gráficos para reintentar.'); render();
@@ -217,27 +267,52 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       if (!active || Math.abs(bar.scrollLeft - (positions.get(bar) ?? -100)) < .75) return;
       const distance = bar.scrollWidth - bar.clientWidth;
       if (distance <= 0) return;
-      const view = windowAtOffset(domain(), duration, bar.scrollLeft / distance);
+      const view = windowAtOffset(domain(), bounds().to - bounds().from, bar.scrollLeft / distance);
       // Llegar al extremo derecho no reactiva el vivo accidentalmente.
       navigate(view.to);
     };
   }
-  function zoom(factor) {
-    const view = bounds(), extent = domain();
-    const nextDuration = Math.max(60000, Math.min(Math.round(duration * factor), extent.to - extent.from));
+  function setIntervalView(nextDuration, whole = false) {
+    const view = bounds(), extent = domain(), wasLive = live;
     const center = (view.from + view.to) / 2;
-    const to = live ? extent.to : Math.min(extent.to, Math.max(extent.from + nextDuration, center + nextDuration / 2));
-    const wasLive = live;
-    navigate(Math.round(to), nextDuration);
+    fullDay = whole;
+    const target = whole ? extent.to : clampDayWindow(extent, nextDuration, wasLive ? currentTime() : center + nextDuration / 2).to;
+    navigate(target, nextDuration);
     if (wasLive) { live = true; viewEnd = null; render(); }
   }
+  function zoom(factor) {
+    const extent = domain(), span = extent.to - extent.from;
+    const nextDuration = Math.max(60000, Math.min(Math.round((bounds().to - bounds().from) * factor), span));
+    setIntervalView(nextDuration, nextDuration === span);
+  }
+  function chooseDay(key) {
+    const day = localDayBounds(key), today = localDayKey(currentTime());
+    if (!day || key > today || (earliest !== null && key < localDayKey(earliest))) {
+      $('chartDateError').textContent = 'Elige una fecha entre el inicio del historial y hoy.'; $('chartDateError').hidden = false;
+      $('chartDate').value = selectedDay; return;
+    }
+    $('chartDateError').hidden = true; selectedDay = key; live = false; fullDay = true;
+    navigate(day.to, day.to - day.from, true);
+  }
+  $('chartDate').onchange = () => chooseDay($('chartDate').value);
+  function shiftDay(offset) {
+    const value = new Date(domain().from); value.setHours(12, 0, 0, 0); value.setDate(value.getDate() + offset);
+    chooseDay(localDayKey(value));
+  }
+  $('previousChartDay').onclick = () => shiftDay(-1);
+  $('nextChartDay').onclick = () => shiftDay(1);
+  for (const button of presetButtons) button.onclick = () => {
+    const minutes = Number(button.dataset.chartMinutes);
+    setIntervalView(minutes * 60000, minutes === 1440);
+  };
   $('zoomInCharts').onclick = () => zoom(.5);
   $('zoomOutCharts').onclick = () => zoom(2);
   $('liveCharts').onclick = () => {
-    clearTimeout(navigationTimer); live = true; viewEnd = null; refresh(true);
+    clearTimeout(navigationTimer); live = true; viewEnd = null; fullDay = false; duration = 15 * 60000; cache = null;
+    $('chartDateError').hidden = true; refresh(true);
   };
   $('showCaptures').onchange = () => render();
-  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); refresh(true); };
+  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); cache = null; refresh(true); };
   document.addEventListener('visibilitychange', () => {
     clearTimeout(timer); clearTimeout(navigationTimer);
     if (document.hidden) { const old = request; request = null; old?.abort(); }
@@ -251,7 +326,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     stop() {
       active = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
       const old = request; request = null; old?.abort();
-      entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false;
+      entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false; cache = null;
       for (const id of ['detectionChart', 'decisionChart']) $(id).replaceChildren();
       for (const id of ['detectionTooltip', 'stepTooltip', 'stepState', 'stepTime', 'chartStatus', 'probabilityAverage', 'probabilityCapture', 'thresholdGuide', 'chartRange', 'chartMode']) $(id).textContent = '';
     }
