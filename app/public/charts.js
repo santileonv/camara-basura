@@ -1,8 +1,8 @@
-import { CLASS_LABELS, CLASS_COLORS, STATE_COLORS, mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath } from './chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath } from './chart-data.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const pct = value => (100 * value).toFixed(1) + ' %';
-const time = value => new Date(value).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+const time = value => new Date(value).toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit', hour12:false });
 const date = value => new Date(value).toLocaleString('es-CL');
 function node(tag, attributes = {}, text) {
   const element = document.createElementNS(NS, tag);
@@ -15,117 +15,132 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   const $ = id => document.getElementById(id);
   let active = false, entries = [], cursor = null, minutes = 15, staleMs = 90000;
   let request = null, timer, resizeTimer, skew = 0, lastUpdated = null, limited = false, error = '';
-  let selectedId = null, refs = [], spans = [];
-  const enabled = [true, true, true, true];
+  let selectedId = null, probability = null, spans = [];
   const rangeButtons = [...document.querySelectorAll('[data-chart-minutes]')];
-  const seriesButtons = [...document.querySelectorAll('[data-chart-series]')];
 
-  function bounds() { const to = Date.now() + skew; return { from: to - minutes * 60000, to }; }
-  function frame(id, from, to, timeline = false) {
-    const svg = $(id), width = Math.max(320, svg.getBoundingClientRect().width || 800);
-    const height = timeline ? 112 : 270, left = 43, right = width - 18, bottom = timeline ? 68 : 231;
+  function bounds() { const to = Date.now() + skew; return { from:to - minutes * 60000, to }; }
+  function frame(id, from, to, binary = false) {
+    const svg = $(id), width = Math.max(300, svg.getBoundingClientRect().width || 800);
+    const height = 280, left = binary ? (width < 450 ? 104 : 124) : 48, right = width - 16, top = 34, bottom = 224;
     const x = timestamp => left + (timestamp - from) / (to - from) * (right - left);
-    const y = value => bottom - value * (bottom - 18);
+    const y = value => binary ? bottom - 24 - value * (bottom - top - 48) : bottom - value * (bottom - top);
     svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.append(node('title', {}, svg.getAttribute('aria-label')));
-    if (!timeline) {
-      for (const value of [0, .2, .4, .6, .8, 1]) {
-        svg.append(node('line', { x1:left, x2:right, y1:y(value), y2:y(value), class:'chartGrid' }));
-        svg.append(node('text', { x:left - 8, y:y(value) + 4, 'text-anchor':'end', class:'chartAxis' }, Math.round(value * 100) + '%'));
-      }
-    }
-    const ticks = width < 450 ? 3 : 5;
+    svg.append(node('text', { x:binary ? 8 : left, y:16, class:'chartAxisTitle' }, binary ? 'Conclusión' : 'Probabilidad de basura (%)'));
+    const ticks = width < 450 ? (minutes === 1440 ? 2 : 3) : 5;
     for (let i = 0; i < ticks; i++) {
       const stamp = from + (to - from) * i / (ticks - 1);
-      svg.append(node('text', { x:x(stamp), y:bottom + 25, 'text-anchor':i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle', class:'chartAxis' }, time(stamp)));
+      const label = (minutes === 1440 ? new Date(stamp).toLocaleDateString('es-CL', { day:'2-digit',month:'2-digit' }) + ' ' : '') + time(stamp);
+      svg.append(node('text', { x:x(stamp), y:bottom + 22, 'text-anchor':i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle', class:'chartAxis' }, label));
     }
-    return { svg, x, y, left, right, width, bottom, from, to };
+    svg.append(node('text', { x:(left + right) / 2, y:height - 7, 'text-anchor':'middle', class:'chartAxisTitle' }, 'Hora de la medición'));
+    return { svg, x, y, left, right, width, top, bottom, from, to };
   }
-
-  function addSeries(ref, segments, value, color, thick = 2, dashed = false, step = false) {
+  function grid(ref, binary = false) {
+    for (const value of binary ? [0, 1] : [0, .2, .4, .6, .8, 1]) {
+      ref.svg.append(node('line', { x1:ref.left, x2:ref.right, y1:ref.y(value), y2:ref.y(value), class:'chartGrid' }));
+      ref.svg.append(node('text', { x:ref.left - 10, y:ref.y(value) + 4, 'text-anchor':'end', class:binary ? 'decisionAxis ' + (value ? 'hasTrash' : 'noTrash') : 'chartAxis' }, binary ? (value ? 'Hay basura' : 'Sin basura') : Math.round(value * 100) + '%'));
+    }
+  }
+  function addSeries(ref, segments, value, color, thick = 2, dashed = false) {
     if (!segments.length) return;
-    ref.svg.append(node('path', { d:seriesPath(segments, ref.x, ref.y, value, step), fill:'none', stroke:color,
-      'stroke-width':thick, ...(dashed ? { 'stroke-dasharray':'5 5' } : {}), 'stroke-linejoin':'round', 'stroke-linecap':'round' }));
-    // Una captura aislada tambien debe ser visible.
+    ref.svg.append(node('path', { d:seriesPath(segments, ref.x, ref.y, value, dashed), fill:'none', stroke:color, 'stroke-width':thick,
+      ...(dashed ? { 'stroke-dasharray':'5 5' } : {}), 'stroke-linejoin':'round', 'stroke-linecap':'round' }));
     for (const segment of segments) if (segment.length === 1)
-      ref.svg.append(node('circle', { cx:ref.x(segment[0].receivedAt), cy:ref.y(value(segment[0])), r:2.5, fill:color }));
+      ref.svg.append(node('circle', { cx:ref.x(segment[0].receivedAt), cy:ref.y(value(segment[0])), r:3, fill:color }));
   }
-
-  function mark(ref, values) {
-    ref.marker = node('line', { y1:14, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(ref.marker);
-    ref.dots = values.map(([value, color]) => {
-      const dot = node('circle', { r:4, fill:color, stroke:'white', 'stroke-width':2 }); ref.svg.append(dot); return { dot, value };
-    });
+  function shadeThresholds(ref, segments) {
+    for (const segment of segments) {
+      const first = segment[0], last = segment.at(-1);
+      for (const [edge, value, color] of [[1, row => row.threshold, '#fdf0e8'], [0, row => 1 - row.threshold, '#edf6ef']]) {
+        const boundary = seriesPath([segment], ref.x, ref.y, value, true);
+        const d = boundary + `L${ref.x(last.receivedAt).toFixed(1)},${ref.y(edge).toFixed(1)}H${ref.x(first.receivedAt).toFixed(1)}Z`;
+        ref.svg.append(node('path', { d, fill:color, stroke:'none' }));
+      }
+    }
   }
-
+  function mark(ref) {
+    ref.marker = node('line', { y1:ref.top, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(ref.marker);
+    ref.dot = node('circle', { r:4, fill:'#b55b36', stroke:'white', 'stroke-width':2 }); ref.svg.append(ref.dot);
+  }
   function selection() {
     const row = entries.find(item => item.id === selectedId) ?? entries.at(-1);
-    for (const ref of refs) {
-      ref.marker.setAttribute('visibility', row ? 'visible' : 'hidden');
-      for (const { dot, value } of ref.dots) {
-        dot.setAttribute('visibility', row ? 'visible' : 'hidden');
-        if (row) { dot.setAttribute('cx', ref.x(row.receivedAt)); dot.setAttribute('cy', ref.y(value(row))); }
+    if (probability) {
+      probability.marker.setAttribute('visibility', row ? 'visible' : 'hidden'); probability.dot.setAttribute('visibility', row ? 'visible' : 'hidden');
+      if (row) {
+        const px = probability.x(row.receivedAt); probability.marker.setAttribute('x1', px); probability.marker.setAttribute('x2', px);
+        probability.dot.setAttribute('cx', px); probability.dot.setAttribute('cy', probability.y(row.trashAverage));
       }
-      if (row) { ref.marker.setAttribute('x1', ref.x(row.receivedAt)); ref.marker.setAttribute('x2', ref.x(row.receivedAt)); }
     }
-    $('detectionTooltip').textContent = row ? `${date(row.receivedAt)} · Captura: ${pct(row.trashNow)} · Promedio (${row.readings}): ${pct(row.trashAverage)} · ${row.conclusion} · Confirmación ${row.streak}/3` : 'No hay mediciones en este intervalo.';
-    const classesText = CLASS_LABELS.map((name, i) => enabled[i] && row ? `${name}: ${pct(row.scores[i])}` : null).filter(Boolean).join(' · ');
-    $('classesTooltip').textContent = row ? date(row.receivedAt) + ' · ' + (classesText || 'Todas las clases están ocultas.') : 'No hay mediciones en este intervalo.';
+    $('probabilityAverage').textContent = row ? pct(row.trashAverage) : '—';
+    $('probabilityCapture').textContent = row ? pct(row.trashNow) : '—';
+    $('averageSamples').textContent = row ? `Promedio de ${row.readings} ${row.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de hasta 5 capturas';
+    $('detectionTooltip').textContent = row ? `${selectedId === null ? 'Última captura del intervalo' : 'Captura seleccionada'}: ${date(row.receivedAt)} · ${row.conclusion} · Confirmación ${row.streak}/3.` : 'No hay mediciones en este intervalo.';
+    $('thresholdGuide').textContent = row ? `En esta medición: ≤ ${pct(1 - row.threshold)} apoya «Sin basura»; ≥ ${pct(row.threshold)} apoya «Hay basura». Entre ambos, la evidencia es intermedia.` : 'Los límites punteados muestran los umbrales de decisión.';
   }
-
   function timestampAt(event, ref) {
     const box = ref.svg.getBoundingClientRect();
     const px = (event.clientX - box.left) / box.width * ref.width;
     return ref.from + Math.max(0, Math.min(1, (px - ref.left) / (ref.right - ref.left))) * (ref.to - ref.from);
   }
-
-  function interact(ref) {
-    const inspect = event => { const row = nearestEntry(entries, timestampAt(event, ref)); selectedId = row?.id ?? null; selection(); };
+  function interactProbability(ref) {
+    const inspect = event => { selectedId = nearestEntry(entries, timestampAt(event, ref))?.id ?? null; selection(); };
     ref.svg.onpointermove = inspect; ref.svg.onpointerdown = inspect;
     ref.svg.onpointerleave = () => { selectedId = null; selection(); };
     ref.svg.onkeydown = event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !entries.length) return;
       event.preventDefault();
-      const current = Math.max(0, entries.findIndex(row => row.id === selectedId));
-      const start = selectedId === null ? entries.length - 1 : current;
+      const start = selectedId === null ? entries.length - 1 : Math.max(0, entries.findIndex(row => row.id === selectedId));
       const index = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : Math.max(0, Math.min(entries.length - 1, start + (event.key === 'ArrowLeft' ? -1 : 1)));
       selectedId = entries[index].id; selection();
     };
   }
-
+  function showDecision(stamp) {
+    const span = spans.find(item => stamp >= item.from && stamp < item.to);
+    const label = !span ? 'Sin datos recientes' : span.conclusion === 'No seguro' ? 'Sin confirmar' : span.conclusion;
+    $('stepState').textContent = label;
+    $('stepState').className = 'decisionTag ' + (!span ? 'missing' : span.conclusion === 'No seguro' ? 'unsure' : span.conclusion === 'Hay basura' ? 'trash' : 'clear');
+    $('stepTime').textContent = date(stamp);
+    $('stepTooltip').textContent = !span ? 'No hay una medición vigente en este momento del gráfico.' : span.conclusion === 'No seguro' ? 'El sistema aún no confirma ninguno de los dos resultados. Por eso la línea se interrumpe.' : `Conclusión confirmada entre ${time(span.from)} y ${time(span.to)}. La altura indica el resultado, no un porcentaje.`;
+  }
+  function drawDecision(from, to) {
+    const ref = frame('decisionChart', from, to, true);
+    const defs = node('defs'), pattern = node('pattern', { id:'noDataPattern', width:8, height:8, patternUnits:'userSpaceOnUse' });
+    pattern.append(node('rect', { width:8, height:8, fill:'#f4f6f2' }), node('path', { d:'M0,8L8,0', stroke:'#dbe4dc', 'stroke-width':1 })); defs.append(pattern); ref.svg.append(defs);
+    ref.svg.append(node('rect', { x:ref.left, y:ref.top, width:ref.right - ref.left, height:ref.bottom - ref.top, fill:'url(#noDataPattern)' }));
+    for (const span of spans) ref.svg.append(node('rect', { x:ref.x(span.from), y:ref.top, width:ref.x(span.to) - ref.x(span.from), height:ref.bottom - ref.top, fill:span.conclusion === 'No seguro' ? '#fff1d6' : 'white' }));
+    grid(ref, true);
+    const runs = decisionStepSegments(spans);
+    ref.svg.append(node('path', { d:decisionStepPath(runs, ref.x, ref.y), class:'decisionLine', fill:'none' }));
+    for (const run of runs) for (const point of [run[0], run.at(-1)])
+      ref.svg.append(node('circle', { cx:ref.x(point.at), cy:ref.y(point.value), r:3.5, fill:point.value ? '#c66742' : '#258263' }));
+    const marker = node('line', { y1:ref.top, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(marker);
+    const inspect = stamp => { showDecision(stamp); marker.setAttribute('visibility', 'visible'); marker.setAttribute('x1', ref.x(stamp)); marker.setAttribute('x2', ref.x(stamp)); };
+    ref.svg.onpointermove = event => inspect(timestampAt(event, ref)); ref.svg.onpointerdown = ref.svg.onpointermove;
+    ref.svg.onpointerleave = () => { marker.setAttribute('visibility', 'hidden'); showDecision(to - 1); };
+    ref.svg.onpointerenter = () => marker.setAttribute('visibility', 'visible');
+    let index = spans.length - 1;
+    ref.svg.onkeydown = event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !spans.length) return;
+      event.preventDefault(); index = event.key === 'Home' ? 0 : event.key === 'End' ? spans.length - 1 : Math.max(0, Math.min(spans.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
+      marker.setAttribute('visibility', 'visible'); inspect((spans[index].from + spans[index].to) / 2);
+    };
+    marker.setAttribute('visibility', 'hidden'); showDecision(to - 1);
+    $('stepEmpty').hidden = !entries.length || runs.length > 0;
+  }
   function render() {
     if (!active) return;
     const { from, to } = bounds(); entries = mergeChartEntries(entries, [], from, to);
+    spans = conclusionSpans(entries, from, to, staleMs); drawDecision(from, to);
     const segments = lineSegments(entries, staleMs);
-    const detection = frame('detectionChart', from, to), classes = frame('classesChart', from, to);
-    addSeries(detection, segments, row => row.threshold, '#c66742', 1.3, true, true);
-    addSeries(detection, segments, row => 1 - row.threshold, '#258263', 1.3, true, true);
-    addSeries(detection, segments, row => row.trashNow, '#8baca0', 1.5);
-    addSeries(detection, segments, row => row.trashAverage, '#245846', 3);
-    mark(detection, [[row => row.trashNow, '#8baca0'], [row => row.trashAverage, '#245846']]);
-    enabled.forEach((show, i) => { if (show) addSeries(classes, segments, row => row.scores[i], CLASS_COLORS[i], 2); });
-    mark(classes, CLASS_COLORS.flatMap((color, i) => enabled[i] ? [[row => row.scores[i], color]] : []));
-    refs = [detection, classes]; refs.forEach(interact); selection();
-    spans = conclusionSpans(entries, from, to, staleMs);
-    const timeline = frame('conclusionsChart', from, to, true);
-    const defs = node('defs'), pattern = node('pattern', { id:'noDataPattern', width:8, height:8, patternUnits:'userSpaceOnUse' });
-    pattern.append(node('rect', { width:8, height:8, fill:'#f2f5f1' }), node('path', { d:'M0,8L8,0', stroke:'#dbe4dc', 'stroke-width':1 })); defs.append(pattern); timeline.svg.append(defs);
-    timeline.svg.append(node('rect', { x:timeline.left, y:24, width:timeline.right - timeline.left, height:36, rx:5, fill:'url(#noDataPattern)' }));
-    for (const span of spans) {
-      const rect = node('rect', { x:timeline.x(span.from), y:24, width:Math.max(.5, timeline.x(span.to) - timeline.x(span.from)), height:36, fill:STATE_COLORS[span.conclusion] });
-      rect.append(node('title', {}, `${span.conclusion}: ${date(span.from)} a ${date(span.to)}`)); timeline.svg.append(rect);
-    }
-    const spanText = span => `${span.conclusion} · ${date(span.from)} a ${date(span.to)} · ${Math.max(1, Math.round((span.to - span.from) / 1000))} s`;
-    const inspectSpan = event => { const stamp = timestampAt(event, timeline); const span = spans.find(item => stamp >= item.from && stamp < item.to); $('conclusionsTooltip').textContent = span ? spanText(span) : `${date(stamp)} · Sin datos recientes`; };
-    timeline.svg.onpointermove = inspectSpan; timeline.svg.onpointerdown = inspectSpan;
-    timeline.svg.onpointerleave = () => { $('conclusionsTooltip').textContent = 'Los tramos rayados indican períodos sin datos recientes.'; };
-    let spanIndex = spans.length - 1;
-    timeline.svg.onkeydown = event => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !spans.length) return;
-      event.preventDefault(); spanIndex = event.key === 'Home' ? 0 : event.key === 'End' ? spans.length - 1 : Math.max(0, Math.min(spans.length - 1, spanIndex + (event.key === 'ArrowLeft' ? -1 : 1)));
-      $('conclusionsTooltip').textContent = spanText(spans[spanIndex]);
-    };
-    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · Actualizado ${time(lastUpdated)}. Se actualiza automáticamente.` + (limited ? ' Vista limitada a las 6000 mediciones más recientes.' : '') : 'Consultando mediciones…');
+    probability = frame('detectionChart', from, to);
+    shadeThresholds(probability, segments); grid(probability);
+    addSeries(probability, segments, row => row.threshold, '#c66742', 1.3, true);
+    addSeries(probability, segments, row => 1 - row.threshold, '#258263', 1.3, true);
+    if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
+    addSeries(probability, segments, row => row.trashAverage, '#b55b36', 3);
+    mark(probability); interactProbability(probability); selection();
+    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · Actualizado ${time(lastUpdated)} · Actualización automática cada 15 s.` + (limited ? ' Vista limitada a las 6000 más recientes.' : '') : 'Consultando mediciones…');
     $('chartStatus').classList.toggle('chartFailure', !!error);
     $('chartEmpty').hidden = entries.length > 0 || !lastUpdated || !!error;
   }
@@ -162,10 +177,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     for (const item of rangeButtons) item.setAttribute('aria-pressed', String(item === button));
     refresh(true);
   };
-  for (const button of seriesButtons) button.onclick = () => {
-    const i = Number(button.dataset.chartSeries); enabled[i] = !enabled[i];
-    button.setAttribute('aria-pressed', String(enabled[i])); render();
-  };
+  $('showCaptures').onchange = () => render();
   $('refreshCharts').onclick = () => refresh(true);
   document.addEventListener('visibilitychange', () => {
     clearTimeout(timer);
@@ -179,9 +191,9 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     start() { if (!active) { active = true; refresh(true); } },
     stop() {
       active = false; clearTimeout(timer); const old = request; request = null; old?.abort();
-      entries = []; cursor = null; selectedId = null; refs = []; spans = []; lastUpdated = null;
-      for (const id of ['detectionChart', 'classesChart', 'conclusionsChart']) $(id).replaceChildren();
-      for (const id of ['detectionTooltip', 'classesTooltip', 'conclusionsTooltip', 'chartStatus']) $(id).textContent = '';
+      entries = []; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null;
+      for (const id of ['detectionChart', 'decisionChart']) $(id).replaceChildren();
+      for (const id of ['detectionTooltip', 'stepTooltip', 'stepState', 'stepTime', 'chartStatus', 'probabilityAverage', 'probabilityCapture', 'thresholdGuide']) $(id).textContent = '';
     }
   };
 }
