@@ -96,6 +96,25 @@ export function createStore(execute) {
     const entries = rows.slice(0, limit);
     return { entries, nextCursor: rows.length > limit ? entries.at(-1).id : null };
   }
-  return { readState, saveReading, readHistory, readCameraSettings, readCameraView, setOrientation };
+  // Consulta acotada; las actualizaciones siguientes solicitan solo IDs nuevos.
+  async function readChartHistory({ minutes = 15, after = null, now = Date.now() } = {}) {
+    if (![15, 60, 1440].includes(minutes) || !Number.isSafeInteger(now) || now <= 0 ||
+      (after !== null && (!/^(0|[1-9]\d{0,18})$/.test(after) || BigInt(after) > 9223372036854775807n)))
+      throw Object.assign(new Error('Intervalo o cursor de graficos invalido.'), { status: 400 });
+    const from = now - minutes * 60000, limit = 6000;
+    const rows = await execute(`SELECT id::text AS id,
+      (extract(epoch FROM recibido_en) * 1000)::double precision AS "receivedAt",
+      conclusion, ARRAY[p_sin_basura, p_botellas, p_papeles_cartones, p_bolsas] AS scores,
+      basura_actual AS "trashNow", basura_promedio AS "trashAverage", umbral AS threshold,
+      capturas_promedio AS readings, confirmaciones AS streak
+      FROM mediciones WHERE camara_id = $1
+      AND recibido_en >= to_timestamp($2::double precision / 1000.0)
+      AND recibido_en <= to_timestamp($3::double precision / 1000.0)
+      AND ($4::bigint IS NULL OR id > $4::bigint)
+      ORDER BY id DESC LIMIT 6001`, [CAMERA_ID, from, now, after]);
+    return { entries: rows.slice(0, limit).reverse(), cursor: rows[0]?.id ?? after ?? '0',
+      from, to: now, truncated: rows.length > limit, limit };
+  }
+  return { readState, saveReading, readHistory, readChartHistory, readCameraSettings, readCameraView, setOrientation };
 }
-export const { readState, saveReading, readHistory, readCameraSettings, readCameraView, setOrientation } = createStore(query);
+export const { readState, saveReading, readHistory, readChartHistory, readCameraSettings, readCameraView, setOrientation } = createStore(query);

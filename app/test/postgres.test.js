@@ -46,6 +46,16 @@ test('PostgreSQL real en WASM: esquema, concurrencia, historial, transaccion y A
     assert.equal((await store.readState()).history.length, 1);assert.equal(await count(), 8);
     await migrate(pool);assert.equal(await count(), 8); // Reiniciar el servidor no borra.
     assert.equal((await createStore(execute).readHistory()).entries.length, 8);
+    const graph = await store.readChartHistory({ minutes:60,now:1700001020000 });
+    assert.equal(graph.entries.length, 8); assert.equal(graph.truncated, false);
+    assert.equal(graph.entries[0].preview, undefined);
+    assert.ok(Math.abs(graph.entries[0].trashNow - .95) < 1e-12);
+    const incremental = await store.readChartHistory({ minutes:60,now:1700001020000,after:graph.cursor });
+    assert.equal(incremental.entries.length, 0); assert.equal(incremental.cursor, graph.cursor);
+    const throughFive = await store.readChartHistory({ minutes:15,now:frame(5).receivedAt });
+    assert.equal(throughFive.entries.length, 5); // No anticipar lecturas con fecha posterior.
+    const lastWindow = await store.readChartHistory({ minutes:15,now:1700001020000 });
+    assert.equal(lastWindow.entries.length, 1); // La ventana temporal excluye capturas antiguas.
     await assert.rejects(store.readHistory({ before: '9223372036854775808' }), error => error.status === 400);
     await assert.rejects(store.readHistory({ before: '1-0' }), error => error.status === 400);
     process.env.SESSION_SECRET = 'postgres-session-test-secret-'.repeat(2);

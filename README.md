@@ -25,6 +25,20 @@ El servidor gira la imagen antes del recorte y de ejecutar el modelo. La miniatu
 
 La ruta `POST /api/camera-settings` exige sesión y el mismo origen. Una versión de configuración evita que una consulta atrasada o una inferencia en curso sobrescriban la orientación elegida. Las columnas `camaras.rotacion` y `camaras.orientacion_version` se incorporan automáticamente al arrancar, con orientación inicial normal para instalaciones anteriores. El JSON mantiene los 16 campos de las mediciones; no reinterpreta resultados históricos.
 
+## Gráficos en tiempo real
+
+Debajo de la cámara hay tres vistas del mismo historial:
+
+- **Detección de basura en el tiempo:** suma de Botellas + Papeles y Cartones + Bolsas por captura, promedio de hasta cinco capturas y umbrales usados en cada medición.
+- **Porcentajes por clase:** cuatro líneas que se pueden ocultar individualmente, con los valores originales del modelo.
+- **Conclusiones en el tiempo:** tramos de Hay basura, Sin basura y No seguro. El rayado representa períodos sin datos recientes; no se confunde con una conclusión negativa.
+
+El selector permite consultar 15 minutos, 1 hora o 24 horas. El cursor, el toque y las flechas del teclado permiten inspeccionar valores y tramos. Se muestran horas locales del dispositivo. Los gráficos conservan las conclusiones registradas: no las recalculan con la configuración actual.
+
+`GET /api/chart-history` exige la misma sesión del monitor y limita cada consulta a 6000 mediciones, sin fotos. Tras la carga inicial, solicita cada 15 segundos solo IDs nuevos; deduplica las filas y descarta las que salen del intervalo. Los IDs permanecen como texto para preservar BIGINT. Cambiar de intervalo cancela la consulta anterior; ocultar la pestaña suspende las consultas y cerrar sesión elimina los datos gráficos de la página. No añade dependencias externas ni cambia el modelo, firmware o esquema de la base.
+
+Las líneas se interrumpen cuando la separación supera `STALE_AFTER_SECONDS`. La franja prolonga cada conclusión hasta la siguiente medición o hasta que venza ese plazo, lo que ocurra antes. Si se alcanza el límite de 6000 filas, la interfaz lo indica; la exportación JSON completa permanece disponible.
+
 ## 1. Crear o seleccionar la base en Aiven
 
 1. Entra en https://console.aiven.io/ con tu cuenta. Si aún no tienes una, completa el registro personalmente.

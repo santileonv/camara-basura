@@ -1,0 +1,26 @@
+.chartsSection{margin-top:32px;min-width:0}
+.chartsHeading,.chartToolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.chartsHeading h2{font-size:24px;margin:0}.chartsHeading .eyebrow{margin:0 0 8px}
+.chartToolbar{margin:20px 0 16px}.chartToolbar p{margin:0}
+.chartRanges{display:flex;gap:5px;background:#e8efe8;padding:4px;border-radius:11px}
+.chartRanges button{border:1px solid transparent;padding:9px 13px;white-space:nowrap;font-size:12px}
+.chartRanges [aria-pressed=true]{background:white;border-color:#cbd9cc;box-shadow:0 2px 5px #17362e0a}
+.chartCard{margin-top:18px;min-width:0}.chartCard h2{margin-bottom:7px}.chartCard .small{margin-top:0}
+.chartLegend{display:flex;gap:12px 18px;flex-wrap:wrap;align-items:center;margin:18px 0 10px;font-size:11px;color:#526c60}
+.chartLegend span,.classToggles button{display:inline-flex;align-items:center;gap:7px}
+.chartSwatch{display:inline-block;width:18px;height:3px;flex-shrink:0;border-radius:3px;background:currentColor}
+.captureSwatch{background:#8baca0;height:2px}.averageSwatch{background:#245846;height:4px}
+.trashThresholdSwatch{background:transparent;border-top:2px dashed #c66742}.clearThresholdSwatch{background:transparent;border-top:2px dashed #258263}
+.classToggles{gap:8px}.classToggles button{font-size:11px;padding:8px 10px;background:#f5f8f3}
+.classToggles [aria-pressed=false]{background:white;color:#829087}.classToggles [aria-pressed=false] .chartSwatch{opacity:.25}
+.class0,.stateClear{background:#258263}.class1{background:#4678be}.class2{background:#b67b27}.class3{background:#9263ac}
+.stateTrash{background:#c66742}.stateUnsure{background:#89968d}.stateTrash,.stateClear,.stateUnsure,.stateEmpty{height:10px;width:14px;border-radius:2px}
+.stateEmpty{background:repeating-linear-gradient(135deg,#f2f5f1,#f2f5f1 3px,#cbd9cc 3px,#cbd9cc 4px);border:1px solid #dbe4dc}
+.timeChart,.timelineChart{display:block;width:100%;height:270px;overflow:visible;touch-action:pan-y}
+.timelineChart{height:112px}.timeChart:focus-visible,.timelineChart:focus-visible{outline:2px solid #4678be;outline-offset:3px;border-radius:5px}
+.chartGrid{stroke:#e9eee8;stroke-width:1}.chartAxis{fill:#6b7d72;font-size:11px;font-family:inherit}
+.chartCursor{stroke:#71877a;stroke-width:1;stroke-dasharray:3 4;pointer-events:none}
+.chartTooltip{font-size:12px;line-height:1.7;color:#496153;background:#f5f8f3;border-radius:8px;padding:10px 12px;min-height:40px;margin:8px 0 0;overflow-wrap:anywhere}
+.chartFootnote{margin:15px 3px}.chartEmpty{font-size:13px;color:#587065;padding:14px;background:#eaf0e8;border-radius:9px}
+.chartFailure{color:#ab342f!important}
+@media(max-width:720px){.chartsHeading h2{font-size:21px}.chartToolbar{align-items:start}.chartLegend{gap:10px 12px}.chartCard{padding:18px 12px}.chartCard h2,.chartCard>.small,.chartCard>.sectionTitle{margin-left:6px;margin-right:6px}.chartRanges{max-width:100%}.chartRanges button{padding:9px 11px}.chartTooltip{font-size:11px}}
