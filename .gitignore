@@ -4,4 +4,6 @@ node_modules/
 .env.*
 !.env.example
 config.h
+ca.pem
+Config_XIAO_Railway.txt
 *.local

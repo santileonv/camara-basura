@@ -34,9 +34,6 @@ export function setSession(res, value, age = 43200) {
 }
 export function validateAuthConfig() {
   required('CAMERA_TOKEN', 32);
-  if (process.env.DASHBOARD_PASSWORD || process.env.SESSION_SECRET) {
-    required('DASHBOARD_PASSWORD', 12); required('SESSION_SECRET', 32);
-  }
 }
 export function sameOrigin(req) {
   if (!req.headers.origin) return true;

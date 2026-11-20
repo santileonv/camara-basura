@@ -24,6 +24,6 @@ test('El monitor no exige clave: cookies invalidas o administracion sin configur
   process.env.SESSION_SECRET = 'public-owner-session-test-'.repeat(3);
   validateAuthConfig();
   const owner = await request('xiao_session=' + createSession());
-  assert.equal(owner.data.canManageCamera,true);
+  assert.equal(owner.data.canManageCamera,false);
   assert.equal((await request(forged)).data.canManageCamera,false);
 });

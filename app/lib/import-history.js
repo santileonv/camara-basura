@@ -23,7 +23,8 @@ export async function importHistory(source, target) {
       await target.query(`INSERT INTO camaras (id,nombre,ubicacion,creada_en,rotacion,orientacion_version) VALUES ($1,$2,$3,$4,$5,$6)
         ON CONFLICT (id) DO UPDATE SET nombre=EXCLUDED.nombre, ubicacion=EXCLUDED.ubicacion,
           creada_en=EXCLUDED.creada_en, rotacion=EXCLUDED.rotacion, orientacion_version=EXCLUDED.orientacion_version`,
-        [row.id,row.nombre,row.ubicacion,row.creada_en,row.rotacion,row.orientacion_version]);
+        [row.id,row.nombre,row.ubicacion,row.creada_en,180,
+          String(BigInt(row.orientacion_version) + (row.rotacion === 180 ? 0n : 1n))]);
     }
     let cursor = '0', measurements = 0;
     for (;;) {
