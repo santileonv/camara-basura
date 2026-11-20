@@ -35,11 +35,13 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     const page=await request('/');assert.match(await page.text(),/Monitor de basura/);
     assert.ok(page.headers.get('content-security-policy'));
     for(const path of ['/model/weights.bin','/.env','/server.js','/../package.json'])assert.equal((await request(path)).status,404);
-    assert.equal((await request('/api/state')).status,401);
-    assert.equal((await request('/api/history')).status,401);
-    assert.equal((await request('/api/chart-history')).status,401);
-    for(const path of ['/charts.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
+    assert.equal((await request('/api/state')).status,200);
+    assert.equal((await request('/api/history')).status,200);
+    assert.equal((await request('/api/chart-history')).status,200);
+    for(const path of ['/charts.js','/chart-data.js','/charts.css','/admin','/admin.js']) assert.equal((await request(path)).status,200);
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
+    for(const path of ['/api/export.json','/api/export.csv','/history-format.js']) assert.equal((await request(path)).status,404);
+    assert.doesNotMatch(await(await request('/')).text(),/type="password"|Descargar|exportJSON|exportHistory/);
     const logged=await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:process.env.DASHBOARD_PASSWORD})});
     assert.equal(logged.status,200);
     assert.match(logged.headers.get('set-cookie'),/HttpOnly; SameSite=Strict.*Secure/);
@@ -51,10 +53,11 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
       assert.equal(result.status,200,await result.text());
     }
     const state=await(await request('/api/state',{headers:{cookie}})).json();
-    assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
-    const history=await(await request('/api/history?limit=2',{headers:{cookie}})).json();
+    assert.equal(state.canManageCamera,true);assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
+    const publicState=await(await request('/api/state')).json();assert.equal(publicState.canManageCamera,false);assert.equal(publicState.state.scores.length,4);
+    const history=await(await request('/api/history?limit=2')).json();
     assert.equal(history.entries.length,2);assert.ok(history.nextCursor);
-    const graph=await(await request('/api/chart-history?minutes=15',{headers:{cookie}})).json();
+    const graph=await(await request('/api/chart-history?minutes=15')).json();
     assert.equal(graph.entries.length,5);assert.equal(graph.entries[0].scores.length,4);
     assert.equal(Number((await db.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),5);
     healthy=false;assert.equal((await request('/healthz')).status,503);

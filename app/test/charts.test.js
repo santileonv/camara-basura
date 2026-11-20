@@ -29,7 +29,7 @@ test('Cortes de red rompen las lineas y dejan huecos en la franja; No seguro sig
   assert.deepEqual(conclusionSpans([], 0, 1000, 150), []);
 });
 
-test('API de graficos protege la sesion, valida intervalos y cursores y admite actualizaciones incrementales', async () => {
+test('API publica de graficos valida intervalos y cursores y admite actualizaciones incrementales', async () => {
   process.env.SESSION_SECRET = 'charts-session-test-'.repeat(3);
   let calls = [];
   const handler = createChartHistoryHandler(async query => { calls.push(query); return { entries:[],cursor:query.after ?? '0',from:1,to:1000000,truncated:false,limit:6000 }; }, () => 1000000);
@@ -37,7 +37,7 @@ test('API de graficos protege la sesion, valida intervalos y cursores y admite a
     let data; const headers = {}; const res = { setHeader(name, value) { headers[name] = value; }, end(value) { data = JSON.parse(value); } };
     await handler({ method, url, headers:{cookie} }, res); return { status:res.statusCode,data,headers };
   };
-  assert.equal((await request('/api/chart-history')).status, 401); assert.equal(calls.length, 0);
+  assert.equal((await request('/api/chart-history')).status, 200); assert.equal(calls.length, 1); calls = [];
   const cookie = 'xiao_session=' + createSession();
   for (const suffix of ['minutes=0', 'minutes=120', 'after=-1', 'after=1e2', 'after=9223372036854775808'])
     assert.equal((await request('/api/chart-history?' + suffix, cookie)).status, 400);

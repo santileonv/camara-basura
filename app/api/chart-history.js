@@ -1,4 +1,3 @@
-import { viewerAuthorized } from '../lib/auth.js';
 import { reply, settings } from '../lib/config.js';
 import { readChartHistory } from '../lib/store.js';
 
@@ -6,7 +5,6 @@ export function createChartHistoryHandler(read = readChartHistory, clock = Date.
   return async (req, res) => {
     try {
       if (req.method !== 'GET') return reply(res, 405, { error: 'Usa GET.' });
-      if (!viewerAuthorized(req)) return reply(res, 401, { error: 'Inicia sesion.' });
       const params = new URL(req.url, 'http://localhost').searchParams;
       const minutes = Number(params.get('minutes') || 15), after = params.get('after');
       if (![15, 60, 1440].includes(minutes) || (after !== null &&

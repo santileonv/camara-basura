@@ -1,8 +1,7 @@
 'use strict';
-import { historyCSV } from './history-format.js';
 import { createCharts } from './charts.js';
 const $ = id => document.getElementById(id);
-const charts = createCharts({ onUnauthorized: () => signedIn(false) });
+const charts = createCharts();
 const labels = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas'];
 const rows = labels.map(label => {
   const row = document.createElement('div'); row.className = 'classRow';
@@ -13,23 +12,15 @@ const rows = labels.map(label => {
   const fill = document.createElement('div'); bar.append(fill); title.append(name, value); row.append(title, bar); $('classes').append(row);
   return { value, fill };
 });
-let authenticated = false, timer, busy = false, last = null, staleMs = 90000;
+let canManageCamera = false, timer, busy = false, last = null, staleMs = 90000;
 let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false, sessionEpoch = 0;
-let jsonBusy = false, exportController;
 let camera = { rotation: 0, version: '0' }, cameraKnown = false, cameraBusy = false;
 const percent = value => (100 * value).toFixed(1) + ' %';
-function signedIn(value) {
-  authenticated = value; $('login').hidden = value; $('dashboard').hidden = !value; $('logout').hidden = !value;
-  $('exportJSON').disabled = !value || jsonBusy;
+function setCameraAccess(value) {
+  if (canManageCamera !== value) sessionEpoch++;
+  canManageCamera = value;
+  $('logout').hidden = !value; $('rotateCamera').hidden = !value;
   $('rotateCamera').disabled = !value || !cameraKnown || cameraBusy;
-  if (value) charts.start(); else charts.stop();
-  if (!value) {
-    clearTimeout(timer); last = null; sessionEpoch++;
-    exportController?.abort();
-    cameraKnown = false; $('cameraError').textContent = '';
-    historyEntries = []; historyCursor = null; historyLoaded = false;
-    $('historyRows').replaceChildren(); $('exportHistory').disabled = true;
-  }
 }
 function acceptCamera(next) {
   // Una respuesta atrasada de otra consulta no deshace el cambio recien guardado.
@@ -39,7 +30,7 @@ function acceptCamera(next) {
 function render() {
   const pending = last && cameraKnown && ((last.orientationVersion ?? '0') !== camera.version || (last.rotation ?? 0) !== camera.rotation);
   const fresh = last && !pending && Date.now() - last.receivedAt <= staleMs;
-  $('rotateCamera').disabled = !authenticated || !cameraKnown || cameraBusy;
+  $('rotateCamera').disabled = !canManageCamera || !cameraKnown || cameraBusy;
   $('rotateCamera').textContent = cameraBusy ? 'Guardando giro…' : (camera.rotation === 180 ? 'Restaurar posición normal' : 'Invertir cámara · 180°');
   $('rotateCamera').setAttribute('aria-pressed', String(camera.rotation === 180));
   $('orientationStatus').textContent = cameraKnown ? (camera.rotation === 180 ? 'Orientación: girada 180°.' : 'Orientación: normal.') +
@@ -85,11 +76,10 @@ async function poll() {
   try {
     const response = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (epoch !== sessionEpoch) return;
-    if (response.status === 401) { signedIn(false); return; }
     const data = await response.json();
     if (epoch !== sessionEpoch) return;
     if (!response.ok) throw new Error(data.error || 'No se pudo consultar el servidor.');
-    acceptCamera(data.camera); signedIn(true); last = data.state; staleMs = data.staleMs;
+    acceptCamera(data.camera); setCameraAccess(data.canManageCamera === true); last = data.state; staleMs = data.staleMs;
     if (last?.preview) {
       const source = 'data:image/jpeg;base64,' + last.preview;
       if ($('photo').getAttribute('src') !== source) $('photo').src = source;
@@ -99,49 +89,44 @@ async function poll() {
     if (!historyLoaded && !historyBusy) loadHistory(true);
   } catch (error) {
     if (epoch !== sessionEpoch) return;
-    if (authenticated) { last = null; render(); $('notice').textContent = error.message; }
-    else $('loginError').textContent = 'No se pudo conectar. Comprueba que la web esté desplegada.';
+    last = null; render(); $('notice').textContent = error.message || 'No se pudo conectar. Intenta nuevamente.';
   } finally {
     busy = false;
-    if (authenticated && !document.hidden) timer = setTimeout(poll, 15000);
+    if (!document.hidden) timer = setTimeout(poll, 15000);
   }
 }
 $('rotateCamera').onclick = async () => {
-  if (!authenticated || !cameraKnown || cameraBusy) return;
+  if (!canManageCamera || !cameraKnown || cameraBusy) return;
   const epoch = sessionEpoch;
   const change = { rotation: camera.rotation === 180 ? 0 : 180, expectedVersion: camera.version };
   cameraBusy = true; $('cameraError').textContent = ''; render();
   try {
     const response = await fetch('/api/camera-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(change), signal: AbortSignal.timeout(15000) });
-    if (epoch !== sessionEpoch || !authenticated) return;
-    if (response.status === 401) { signedIn(false); return; }
+    if (epoch !== sessionEpoch || !canManageCamera) return;
+    if (response.status === 401) { setCameraAccess(false); render(); $('cameraError').textContent = 'La sesión de administración venció. Vuelve a entrar desde Administración.'; return; }
     const data = await response.json();
-    if (epoch !== sessionEpoch || !authenticated) return;
+    if (epoch !== sessionEpoch || !canManageCamera) return;
     if (!response.ok) throw new Error(data.error || 'No se pudo guardar el giro.');
     acceptCamera(data.camera);
   } catch (error) {
-    if (epoch === sessionEpoch && authenticated) $('cameraError').textContent = error.message || 'No se pudo confirmar el giro. Actualiza para comprobar la orientación guardada.';
+    if (epoch === sessionEpoch && canManageCamera) $('cameraError').textContent = error.message || 'No se pudo confirmar el giro. Actualiza para comprobar la orientación guardada.';
   } finally {
     cameraBusy = false;
-    if (epoch === sessionEpoch && authenticated) { render(); await poll(); }
+    if (epoch === sessionEpoch && canManageCamera) { render(); await poll(); }
   }
 };
 async function loadHistory(reset = false) {
-  if (historyBusy || !authenticated) return;
+  if (historyBusy) return;
   historyBusy = true;
-  const epoch = sessionEpoch;
   $('refreshHistory').disabled = true; $('moreHistory').disabled = true;
   $('historyStatus').textContent = 'Consultando historial…';
   try {
     const query = new URLSearchParams({ limit: '50' });
     if (!reset && historyCursor) query.set('before', historyCursor);
     const response = await fetch('/api/history?' + query, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
-    if (epoch !== sessionEpoch || !authenticated) return;
-    if (response.status === 401) { signedIn(false); return; }
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo leer el historial.');
-    if (epoch !== sessionEpoch || !authenticated) return;
     if (reset) { historyEntries = []; $('historyRows').replaceChildren(); }
     const known = new Set(historyEntries.map(row => row.id));
     const newEntries = data.entries.filter(row => !known.has(row.id));
@@ -153,58 +138,23 @@ async function loadHistory(reset = false) {
       $('historyRows').append(tr);
     }
     $('historyStatus').textContent = historyEntries.length ? `${historyEntries.length} registros cargados · Consulta: ${new Date().toLocaleTimeString('es-CL')}` : 'Aún no hay mediciones guardadas. El historial comienza al recibir fotos con esta versión.';
-    $('moreHistory').hidden = !historyCursor; $('exportHistory').disabled = historyEntries.length === 0;
+    $('moreHistory').hidden = !historyCursor;
   } catch (error) {
-    if (epoch === sessionEpoch && authenticated) $('historyStatus').textContent = error.message || 'No se pudo consultar el historial.';
+    $('historyStatus').textContent = error.message || 'No se pudo consultar el historial.';
   } finally {
     historyBusy = false; $('refreshHistory').disabled = false; $('moreHistory').disabled = false;
   }
 }
 $('refreshHistory').onclick = () => loadHistory(true);
 $('moreHistory').onclick = () => loadHistory(false);
-$('exportJSON').onclick = async () => {
-  if (!authenticated || jsonBusy) return;
-  const epoch = sessionEpoch;
-  const controller = new AbortController(); exportController = controller;
-  jsonBusy = true; $('exportJSON').disabled = true;
-  $('exportStatus').textContent = 'Preparando todas las mediciones…';
+$('logout').onclick = async () => {
   try {
-    const response = await fetch('/api/export.json', { cache: 'no-store', signal: controller.signal });
-    if (response.status === 401) { signedIn(false); return; }
-    if (!response.ok) {
-      const data = await response.json(); throw new Error(data.error || 'No se pudo exportar.');
-    }
-    const blob = await response.blob();
-    if (epoch !== sessionEpoch || !authenticated) return;
-    const url = URL.createObjectURL(blob), link = document.createElement('a');
-    link.href = url; link.download = 'mediciones-xiao-' + new Date().toISOString().slice(0, 10) + '.json';
-    document.body.append(link); link.click(); link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    $('exportStatus').textContent = 'Archivo preparado con todas las mediciones de la instantánea.';
-  } catch (error) {
-    if (!controller.signal.aborted && epoch === sessionEpoch && authenticated)
-      $('exportStatus').textContent = error.message || 'La descarga se interrumpió. Intenta nuevamente.';
-  } finally {
-    jsonBusy = false; exportController = undefined; $('exportJSON').disabled = !authenticated;
-  }
+    const response = await fetch('/api/logout', { method:'POST', signal:AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error('No se pudo cerrar la administración.');
+    setCameraAccess(false); render(); await poll();
+  } catch (error) { $('notice').textContent = error.message || 'No se pudo conectar.'; }
 };
-$('exportHistory').onclick = () => {
-  if (!authenticated || !historyEntries.length) return;
-  const url = URL.createObjectURL(new Blob([historyCSV(historyEntries)], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a'); link.href = url;
-  link.download = 'mediciones-xiao-' + new Date().toISOString().slice(0, 10) + '.csv';
-  document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
-$('loginForm').addEventListener('submit', async event => {
-  event.preventDefault(); $('enter').disabled = true; $('loginError').textContent = '';
-  try {
-    const response = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('password').value }) });
-    const data = await response.json(); if (!response.ok) throw new Error(data.error);
-    $('password').value = ''; signedIn(true); await poll();
-  } catch (error) { $('loginError').textContent = error.message || 'No se pudo conectar.'; }
-  finally { $('enter').disabled = false; }
-});
-$('logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); signedIn(false); };
-document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden && authenticated) poll(); });
-setInterval(() => { if (authenticated && !document.hidden) render(); }, 1000);
+document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) poll(); });
+setInterval(() => { if (!document.hidden) render(); }, 1000);
+charts.start();
 poll();
