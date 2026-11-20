@@ -1,137 +1,117 @@
-# Detector de basura XIAO · Railway y PostgreSQL
+# Detector de basura XIAO · Railway + PostgreSQL en Aiven
 
-Versión 3.0.0 · TALLER DISEÑO · 14 de noviembre de 2026.
+Versión 3.1.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
-La XIAO ESP32-S3 Sense envía fotografías JPEG por Internet al servidor de Railway. El servidor mantiene cargado el modelo de Teachable Machine, analiza las capturas, combina las probabilidades de residuos y guarda cada medición en PostgreSQL. La página web permite consultar el resultado y el historial desde otra red, incluso desde los datos móviles del teléfono. La detección continúa con la página cerrada.
+La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor se puede abrir desde cualquier red. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-Esta entrega utiliza GitHub como origen del código y Railway para ejecutar el servidor y PostgreSQL. En tu cuenta ya se creó el proyecto **Taller-Diseno-XIAO**, con PostgreSQL en línea y el servicio web configurado. **El servicio web todavía no tiene un despliegue de código**: falta subir los archivos a un repositorio privado y conectarlo al servicio existente. No se han borrado recursos ni registros anteriores de Vercel o Neon.
+Esta actualización añade **Descargar todo · JSON**, conexión TLS con certificado CA para Aiven y una herramienta para copiar el historial conservando IDs, fechas y el último estado. El firmware no necesita cambios por trasladar la base si conservas el dominio y el token del servidor.
 
-## Estado de tu proyecto creado
+**Estado comprobado al preparar esta versión:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. Tanto el servicio web como `Postgres` están detenidos. El volumen de PostgreSQL sigue asociado. La migración real a Aiven y la publicación de esta versión aún no se han ejecutado. Este documento describe cómo completar y comprobar esas acciones.
 
-| Recurso | Identificación y estado comprobado |
+| Componente | Dónde funciona |
 |---|---|
-| Proyecto | `Taller-Diseno-XIAO` · `8a09dbaa-0204-48ec-bd38-abd6aaa4ea0f`. |
-| Entorno | `production` · `1fef8631-bec4-4a08-b37a-407f3a325014`. |
-| PostgreSQL | `Postgres` · `af3991a4-cb98-4995-bb77-68804b4f67e7` · despliegue SUCCESS, con volumen. |
-| Servicio web | `xiao-monitor` · `455ab1d7-ec8b-4c87-ac72-6ba2fe7734de` · creado, configurado, sin código desplegado. |
-| Dominio reservado | `https://xiao-monitor-production.up.railway.app` · todavía no sirve la aplicación. |
-| Configuración | Raíz `/app`, ocho variables definidas, referencia interna de PostgreSQL, puerto 3000, Dockerfile, una réplica y healthcheck `/healthz`. |
-| Acceso | Clave del monitor y token de cámara generados y configurados; se entregan por separado en `Config_XIAO_Railway.txt`. |
+| Firmware y cámara | XIAO ESP32-S3 Sense |
+| Código del servidor | GitHub: `santileonv/camara-basura` |
+| Web y análisis del modelo | Railway: `Taller-Diseno-XIAO` → `xiao-monitor` |
+| Datos actuales antes de la copia | Railway: `Postgres` |
+| Destino propuesto para los datos | PostgreSQL de Aiven |
+| Monitor | https://xiao-monitor-production.up.railway.app |
 
-No crees otro proyecto ni otra base si continúas con los recursos de esta tabla. Los apartados de creación siguientes también sirven para reproducir la instalación desde cero.
+## 1. Crear o seleccionar la base en Aiven
 
-Para terminar en este proyecto con GitHub:
+1. Entra en https://console.aiven.io/ con tu cuenta. Si aún no tienes una, completa el registro personalmente.
+2. Si ya tienes un PostgreSQL de Aiven para este proyecto, úsalo; no crees uno duplicado. Para copiar datos antiguos, el destino debe estar vacío de mediciones y estados.
+3. Si necesitas crear la base, selecciona **PostgreSQL** y el plan explícitamente marcado **Free / $0**. No elijas un plan de pago amparado solo por créditos de prueba. Comprueba la selección antes de crear el servicio. Si Free no está disponible en tu cuenta, detén ese paso y revisa las opciones.
+4. Espera a que el servicio indique que está en ejecución. Abre sus datos de conexión y copia la **Service URI** de PostgreSQL.
+5. Descarga su certificado **CA**. Abre el archivo de certificado y copia el bloque completo, desde `-----BEGIN CERTIFICATE-----` hasta `-----END CERTIFICATE-----`, con saltos de línea.
+6. La URI y su contraseña se introducen únicamente en las variables privadas de Railway. No las subas a GitHub ni las pegues en el chat. El certificado CA es público, pero su valor debe corresponder al servicio.
 
-1. Crea un repositorio privado, por ejemplo `xiao-detector-basura`, en tu cuenta de GitHub.
-2. Extrae el ZIP y sube el contenido de `XIAO_Railway_Remoto`: `app`, `firmware`, README y los demás archivos del paquete. En la raíz del repositorio debe verse `app`, y dentro `app/package.json`, `app/Dockerfile` y `app/model/weights.bin`.
-3. Puedes usar la opción de GitHub **Add file → Upload files** y arrastrar archivos y carpetas. En un repositorio vacío, usa el enlace para subir archivos existentes. Confirma la subida en la rama `main`.
-4. Utiliza una extracción limpia del ZIP. Mantén fuera del repositorio `Config_XIAO_Railway.txt`, `config.h`, archivos `.env` con claves y `node_modules`. Si subes por el navegador, revisa los archivos seleccionados: no dependas de `.gitignore` para excluirlos.
-5. En Railway abre **Taller-Diseno-XIAO → xiao-monitor → Settings → Source → Connect Repo**. Conecta tu cuenta GitHub si lo solicita y concede acceso al repositorio del proyecto. Selecciona ese repositorio y la rama `main`.
-6. Comprueba **Root Directory: `/app`**. Ya quedó ajustado en el servicio para esta estructura. Conserva `Dockerfile` como ruta del Dockerfile y `/healthz` como ruta de salud.
-7. Revisa **Variables**: la conexión de PostgreSQL y las claves ya están configuradas. Conserva sus valores.
-8. Aplica los cambios y despliega si Railway lo solicita. Espera a que el despliegue termine en **SUCCESS**, verifica `/healthz` y entra al monitor. Después configura y carga la XIAO como explica el apartado 7.
+No desactives la comprobación TLS para resolver un error. El código verifica la CA y el nombre del servidor. Si hay restricciones de IP en Aiven, revisa el acceso de Railway antes de migrar; no amplíes el acceso de red sin decidirlo expresamente.
 
-Este método de despliegue no requiere instalar la CLI de Railway ni ejecutar `railway up`. Los cambios que subas a la rama conectada se desplegarán automáticamente mientras el despliegue automático esté habilitado. Cambiar el firmware guardado en GitHub no actualiza por sí solo la placa: el sketch se sigue cargando mediante Arduino IDE.
+## 2. Publicar el código mediante GitHub
 
-Que se anuncie una subida o un build no significa que esté listo: comprueba que el despliegue termine en **SUCCESS** y que `/healthz` responda correctamente. Las tablas se crearán en el primer arranque exitoso del servidor. No se ha ejecutado una copia de datos de una base anterior porque no se proporcionó su conexión.
+1. Descarga y extrae el paquete actualizado en una carpeta aparte. Conserva tu `config.h` local y tus ajustes de WiFi.
+2. En tu copia del repositorio `santileonv/camara-basura`, revisa los cambios existentes y reemplaza los archivos de `app` por esta versión. La carpeta del repositorio debe contener `app/package.json` y `app/Dockerfile`; evita crear una carpeta adicional que cambie la raíz `/app`.
+3. Revisa el diff antes del commit para conservar cambios propios que hayas realizado desde la versión anterior. No necesitas reemplazar el firmware ni volver a subir el modelo si no han cambiado.
+4. No incluyas `.env`, `config.h`, `Config_XIAO_Railway.txt`, contraseñas ni `node_modules`. El paquete limpio tampoco los incluye.
+5. Si vas a conservar datos, apaga primero la XIAO y sigue la pausa de recepción descrita en el apartado 3 antes de reanudarla. Un push a la rama conectada puede iniciar automáticamente un despliegue y consumir recursos.
+6. Sube el commit a `main` cuando corresponda desplegarlo. Railway debe conservar raíz `/app`, Dockerfile, puerto 3000 y healthcheck `/healthz`.
 
-## 1. Qué incluye
+## 3. Copiar el historial existente sin borrarlo
 
-| Archivo o carpeta | Función |
+Este procedimiento mantiene la base original y realiza la copia desde dentro de Railway, donde se puede alcanzar `postgres.railway.internal`. No requiere ejecutar la CLI en tu PC. Durante la operación debes mantener la cámara apagada y la recepción pausada.
+
+### A. Preparar el origen y pausar las capturas
+
+1. Enciende el servicio `Postgres` original en Railway usando su opción de despliegue/reanudación. No lo elimines ni crees otro volumen.
+2. En **xiao-monitor → Variables**, conserva por ahora `DATABASE_URL=${{Postgres.DATABASE_URL}}` y añade `INGEST_PAUSED=true`.
+3. Publica esta versión y despliega el servidor con esas variables. Espera **SUCCESS**. En los registros debe aparecer `Recepcion de capturas pausada por mantenimiento.`
+4. Abre `/healthz` y verifica HTTP 200 con `{"ok":true}`. Entra al monitor y descarga un JSON previo a la migración. Si necesitas una copia completa de la base, conserva también un respaldo PostgreSQL: el JSON de mediciones no reemplaza un `pg_dump`.
+5. Revisa el conteo de mediciones y las fechas de las últimas filas. No reanudes la cámara todavía.
+
+### B. Preparar el destino y ejecutar una sola copia
+
+Añade en **Variables del servicio web**:
+
+| Variable | Valor durante la copia |
 |---|---|
-| `app/server.js` | Arranque del servidor, tablas, modelo, rutas y cierre ordenado. |
-| `app/Dockerfile` | Entorno Node 22 reproducible para Railway. |
-| `app/lib/database.js` | Conexiones PostgreSQL con el controlador `pg`. |
-| `app/database/schema.sql` | Tablas, restricciones e índice del historial. |
-| `app/lib/model.js` y `app/model/` | Modelo entrenado, pesos y procesamiento de imágenes. |
-| `app/lib/decision.js` | Suma de clases, promedio y confirmación de basura. |
-| `app/lib/store.js` | Registro atómico de mediciones, estado y paginación. |
-| `app/public/` | Monitor, inicio de sesión, historial y exportación CSV. |
-| `app/scripts/import-history.js` | Copia opcional de la base anterior a una base nueva. |
-| `app/test/` | Pruebas de detección, PostgreSQL, migración y servidor HTTP. |
-| `firmware/XIAO_Remota/` | Sketch de la cámara, configuración de ejemplo y certificados. |
+| `DATABASE_URL` | Mantener `${{Postgres.DATABASE_URL}}`, el origen |
+| `INGEST_PAUSED` | `true` |
+| `AIVEN_DATABASE_URL` | Service URI privada del PostgreSQL de Aiven |
+| `AIVEN_CA_CERT` | Certificado CA completo de Aiven, con sus saltos de línea |
 
-La versión anterior utilizaba funciones de Vercel y el conector de Neon. Esta utiliza un servidor Node persistente y PostgreSQL directamente. El modelo entrenado y las clases se conservan. No necesitas generar `assets.h`.
+1. En **Settings → Deploy → Pre-deploy Command**, configura `npm run db:copy-to-aiven`. Si el panel ofrece un tiempo límite, usa uno suficiente para tu historial, por ejemplo 600 segundos para este prototipo.
+2. Despliega. El paso previo crea las tablas en Aiven y copia cámaras, mediciones y estado. La aplicación seguirá pausada y conectada al origen después de este despliegue.
+3. Comprueba en los registros del paso previo el mensaje **`COPIA_AIVEN_OK`** y sus conteos `cameras`, `measurements` y `states`. Si falla, no cambies la conexión: revisa el motivo. El importador se niega a sobrescribir un destino que ya contiene estados o mediciones.
+4. Verifica en Aiven que el conteo coincide con el origen y revisa varias filas. No ejecutes de nuevo una copia que ya terminó correctamente; el destino ya estará ocupado.
 
-## 2. Preparar el proyecto
+El origen se lee en una instantánea de solo lectura. La copia de datos del destino es transaccional: si falla antes de confirmar, se revierte. El esquema puede quedar creado y vacío, y la secuencia de IDs puede haberse adelantado ante un fallo final; eso no borra el origen ni crea mediciones parciales. El importador conserva IDs, marcas de tiempo y estado; deja preparada la secuencia para las capturas siguientes.
 
-1. Descomprime el ZIP y conserva toda la carpeta, incluidos el modelo y sus pesos.
-2. Sube el contenido de `XIAO_Railway_Remoto` a un repositorio privado de GitHub. En la raíz del repositorio deben quedar `app`, `firmware` y este README.
-3. No subas `config.h`, archivos `.env` ni contraseñas. Los archivos de ejemplo sí se incluyen.
-4. Puedes usar el mismo modelo de esta entrega; no hace falta volver a entrenarlo.
+### C. Cambiar el servidor a Aiven
 
-Con esta estructura, Railway utiliza `/app` como raíz del servicio. Conserva las carpetas y los pesos del modelo al subir el proyecto; el ZIP comprimido por sí solo no es el código fuente que Railway necesita construir.
+1. **Borra el contenido del Pre-deploy Command** y guarda. Dejarlo configurado provocaría que una actualización intente copiar de nuevo y se detenga al encontrar datos.
+2. Cambia estas variables del servicio web:
 
-## 3. Crear PostgreSQL en Railway
-
-1. En Railway, crea un proyecto para el detector.
-2. Añade un servicio de base de datos **PostgreSQL** desde la plantilla oficial.
-3. Espera a que termine de desplegarse y comprueba que tiene su volumen de datos.
-4. Conserva sus variables automáticas. El servidor utilizará su `DATABASE_URL` interna.
-
-Las tres tablas se crean automáticamente cuando inicia la aplicación. No hace falta copiar el SQL a mano. El archivo SQL se incluye para documentar el esquema y para consultas administrativas. Repetir el arranque no elimina información.
-
-| Tabla | Qué conserva |
+| Variable | Valor final |
 |---|---|
-| `camaras` | Identificación de la cámara; inicialmente `camara-1`. |
-| `estado_camara` | Última captura, miniatura, ventana de promedio y revisión. |
-| `mediciones` | Una fila por captura aceptada, con fecha, porcentajes y conclusión. |
+| `DATABASE_URL` | `${{AIVEN_DATABASE_URL}}` |
+| `DATABASE_CA_CERT` | `${{AIVEN_CA_CERT}}` |
+| `DATABASE_REQUIRE_TLS` | `true` |
+| `INGEST_PAUSED` | `false` |
 
-La cámara no accede a la base de datos. Envía las fotos a la API HTTPS; solo el servidor se conecta a PostgreSQL. No necesitas publicar el puerto de PostgreSQL para este funcionamiento.
+3. Conserva `AIVEN_DATABASE_URL` y `AIVEN_CA_CERT`: las referencias finales dependen de ellas. Mantén `CAMERA_TOKEN`, `DASHBOARD_PASSWORD` y `SESSION_SECRET` sin cambios.
+4. Despliega y espera **SUCCESS**. Verifica `/healthz`, el historial y una descarga JSON. Los conteos y los valores anteriores deben coincidir.
+5. Enciende la XIAO y comprueba `HTTP 200`. Actualiza el historial y confirma que se agregan registros nuevos con IDs posteriores.
+6. Solo después de comprobar el traspaso puedes detener el servicio `Postgres` original. Conserva el volumen y un respaldo mientras verificas el funcionamiento; no hace falta eliminarlo para completar la migración.
 
-## 4. Crear el servicio web
+Si el cambio a Aiven falla antes de aceptar capturas nuevas, vuelve a pausar la recepción y restaura la referencia original de `DATABASE_URL`; elimina las variables TLS aplicables solo a Aiven para esa conexión privada. Si ya hay capturas nuevas en Aiven, no cambies al origen sin reconciliar esos datos: las bases habrán empezado a divergir.
 
-1. En tu proyecto ya creado, abre **xiao-monitor** y conecta el repositorio desde **Settings → Source → Connect Repo**. Si reproduces la instalación desde cero, crea el servicio web en el mismo proyecto de PostgreSQL.
-2. En **Settings → Source**, establece **Root Directory: `/app`** si subiste la estructura del apartado 2.
-3. Railway detectará el `Dockerfile` de esa carpeta. El arranque está definido como `node server.js`.
-4. Configura **una réplica** para este prototipo. La recepción limita a una imagen en análisis a la vez por instancia.
-5. En la configuración de despliegue, establece **Healthcheck Path: `/healthz`**. El servidor responde correctamente cuando el modelo ya está preparado y PostgreSQL responde.
-6. Mantén desactivada la suspensión del servicio si quieres que el modelo permanezca listo continuamente.
+Si no existe historial y quieres empezar vacío, omite la copia y configura directamente Aiven como `DATABASE_URL`, con su CA y TLS obligatorio. El servidor creará las tablas al arrancar. Esa opción no traslada registros anteriores.
 
-No hace falta definir `PORT`: Railway lo inyecta y el servidor escucha en `0.0.0.0`. No se utilizan archivos antiguos `vercel.json`, `railway.json` ni `railway.toml`.
+## 4. Administrar la base y descargar los datos
 
-## 5. Variables del servicio web
+En Aiven abre tu servicio PostgreSQL y **PG Studio**. Ahí puedes consultar las tablas y ejecutar SQL. Para este proyecto:
 
-Configúralas en **Variables** del servicio web, no en el código del navegador.
-
-| Variable | Valor |
-|---|---|
-| `DATABASE_URL` | Referencia a `DATABASE_URL` del servicio PostgreSQL del mismo proyecto. |
-| `CAMERA_TOKEN` | Clave aleatoria de al menos 32 caracteres; debe coincidir con la XIAO. |
-| `DASHBOARD_PASSWORD` | Clave para entrar a la web, de al menos 12 caracteres. |
-| `SESSION_SECRET` | Secreto aleatorio de al menos 32 caracteres para firmar sesiones. |
-| `NODE_ENV` | `production`. |
-| `THRESHOLD` | `0.80`. |
-| `STALE_AFTER_SECONDS` | `90`. |
-
-Para `DATABASE_URL`, usa **Add Reference Variable** y selecciona el PostgreSQL del proyecto. Si el servicio se llama `Postgres`, la referencia puede verse así:
-
-```text
-DATABASE_URL=${{Postgres.DATABASE_URL}}
+```sql
+SELECT count(*) AS total FROM public.mediciones;
+SELECT * FROM public.mediciones ORDER BY id DESC LIMIT 100;
+SELECT pg_size_pretty(pg_database_size(current_database())) AS tamano_base;
 ```
 
-Usa el nombre real que aparece en tu proyecto. La conexión interna solo funciona desde Railway; no la pruebes desde tu PC como si fuera una dirección pública.
+PG Studio permite exportar resultados de consulta a CSV. Para un archivo JSON completo de mediciones, entra al monitor y pulsa **Descargar todo · JSON**. No necesitas pulsar Cargar más ni mantener abierta una herramienta de administración.
 
-Puedes generar las tres claves desde tu PC, dentro de `app`:
+| Descarga | Contenido |
+|---|---|
+| CSV | Solo las filas cargadas en la tabla del monitor, con porcentajes y fechas UTC |
+| JSON | Todas las filas guardadas en `mediciones`, de todas las cámaras, en una instantánea consistente |
 
-```bash
-node scripts/secrets.js
-```
+El JSON tiene `schema_version`, `exportado_en`, `tabla`, `datos` y `total_registros`. Cada fila conserva los 16 campos de la tabla: ID, cámara, fecha de recepción, arranque, secuencia, conclusión, las cuatro puntuaciones, basura actual y promedio, umbral, cantidad de capturas, confirmaciones y tiempo de análisis. IDs y secuencias van como texto para preservar enteros de 64 bits. Las fechas se expresan en UTC conservando microsegundos. Las puntuaciones originales van de 0 a 1; por ejemplo, `0.45` equivale a 45 %.
 
-El comando muestra claves nuevas cada vez. Guarda las elegidas y no vuelvas a generarlas para una cámara ya configurada sin actualizar también su token. No compartas las claves por capturas de pantalla ni las publiques en GitHub.
+La descarga exige una sesión del monitor, igual que el historial. El servidor procesa lotes y permite una exportación simultánea por proceso. Si la conexión falla a mitad de la descarga, se interrumpe el archivo; reintenta la descarga completa. El botón del navegador prepara el archivo en memoria, por lo que para historiales muy grandes conviene usar una herramienta PostgreSQL de escritorio o un respaldo de base de datos.
 
-## 6. Publicar y comprobar la web
+Se guardan resultados numéricos de cada captura aceptada y solo la última miniatura en `estado_camara`. El JSON no contiene imágenes, pesos del modelo ni un respaldo de todas las tablas. No puede recuperar fotos históricas que nunca se almacenaron.
 
-1. Guarda las variables y despliega el servicio.
-2. Revisa los registros. Deben terminar con `Servidor listo` y confirmar que el modelo y PostgreSQL están preparados.
-3. En **Settings → Networking → Public Networking**, pulsa **Generate Domain**.
-4. Abre la dirección HTTPS que entregue Railway. Esa es la dirección del monitor.
-5. Abre la misma dirección seguida de `/healthz`. Debe devolver `{"ok":true}`.
-6. Entra al monitor con `DASHBOARD_PASSWORD`. Antes de conectar la cámara aparecerá sin capturas recientes y con el historial vacío.
-
-La URL tendrá un formato parecido a `https://TU_PROYECTO.up.railway.app`. Es un ejemplo, no una dirección creada para ti. Usa exactamente el dominio que genere tu despliegue.
-
-## 7. Conectar la XIAO
+## 5. Cámara y WiFi
 
 1. Abre `firmware/XIAO_Remota/XIAO_Remota.ino` en Arduino IDE.
 2. Copia `config.example.h` como `config.h` en la misma carpeta.
@@ -154,7 +134,7 @@ El envío contiene JPEG binario, un token y un identificador de captura. La cone
 
 El WiFi sigue configurándose en `config.h`. Esta entrega no implementa todavía un portal para seleccionar redes desde el teléfono o la página remota.
 
-## 8. Qué hace la detección
+## 6. Lógica de detección
 
 1. La cámara obtiene una imagen de **800 × 600** y la envía por HTTPS.
 2. El servidor recorta el cuadrado central de **600 × 600**, lo reduce a **224 × 224** y aplica la misma normalización del modelo de Teachable Machine.
@@ -170,48 +150,21 @@ La pausa de captura es de **15 segundos después de terminar cada envío**. El t
 
 Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**. El historial anterior sigue disponible. Los porcentajes son puntuaciones de clasificación; no expresan volumen, cantidad de objetos ni una medición física de basura.
 
-## 9. Consultar el historial desde cualquier lugar
+## 7. Variables y archivos nuevos
 
-Abre el dominio público de Railway y entra con tu clave. Puedes hacerlo desde una red diferente a la de la cámara.
+| Archivo o variable | Función |
+|---|---|
+| `lib/raw-export.js` | Lee todas las mediciones por lotes en una instantánea de solo lectura |
+| `api/export.js` | Ruta protegida `GET /api/export.json`, descarga y control de interrupciones |
+| `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
+| `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
+| `scripts/import-history.js` | Importador general: `SOURCE_DATABASE_URL` → `DATABASE_URL` |
+| `SOURCE_DATABASE_CA_CERT` | CA opcional del origen cuando usa el importador general |
+| `INGEST_PAUSED` | Detiene temporalmente el análisis y guardado de nuevas capturas |
 
-- El estado actual se consulta aproximadamente cada 15 segundos mientras la pestaña está visible.
-- El historial se carga por páginas y puedes pulsar **Actualizar historial** para incorporar nuevas filas.
-- **Cargar más registros** recupera registros anteriores.
-- El CSV incluye únicamente las filas cargadas en pantalla. Para exportar todo, carga todas las páginas primero.
-- Las fechas de pantalla usan la zona horaria del dispositivo; el CSV incluye fechas UTC.
+La base original sigue siendo compatible: añadir JSON no obliga a migrar a Aiven. El certificado del destino no se aplica por accidente al origen: cada conexión usa su propia configuración TLS.
 
-Se guardan los resultados numéricos de todas las capturas aceptadas. Solo se conserva la miniatura de la última captura en `estado_camara`; esta entrega no archiva todas las fotografías.
-
-## 10. Trasladar datos anteriores de Neon u otro PostgreSQL
-
-Este paso es opcional. Si nunca desplegaste la base anterior o no tienes mediciones, empieza con la base nueva. No hay registros que copiar.
-
-El importador espera el esquema PostgreSQL de la versión 2 de este proyecto: `camaras`, `estado_camara` y `mediciones`. Una base Upstash/Redis necesita otra conversión; esta herramienta no importa Redis.
-
-1. Apaga temporalmente la XIAO para que la base anterior deje de recibir capturas. Conserva Vercel y Neon mientras verificas el traspaso.
-2. Despliega el servicio web nuevo y verifica que la base de destino no tenga mediciones ni estados. El importador se negará a sobrescribir un destino con información.
-3. Añade temporalmente **solo al servicio web** la variable `SOURCE_DATABASE_URL` con la conexión de la base anterior. Conserva `DATABASE_URL` apuntando al PostgreSQL nuevo. No uses la misma base como origen y destino.
-4. Instala la CLI oficial si hace falta: `npm install -g @railway/cli`, y autentícate con `railway login`.
-5. En el panel de Railway, abre el menú del servicio web y copia su comando SSH con **Copy SSH Command**. Ejecútalo en tu terminal. Es una sesión dentro del contenedor de Railway.
-6. Dentro de esa sesión ejecuta:
-
-```bash
-cd /app
-npm run db:import
-```
-
-7. Espera `Importacion completada` y revisa los conteos de cámaras, mediciones y estados. Si hay un fallo, el destino revierte la copia; el origen permanece de solo lectura.
-8. Comprueba en el monitor fechas y resultados de varios registros. Se conservan los IDs y los datos; la secuencia de IDs queda preparada para las nuevas capturas.
-9. Elimina la variable temporal `SOURCE_DATABASE_URL` del servicio web y vuelve a desplegar si Railway lo solicita.
-10. Actualiza la XIAO con la URL de Railway y su token, enciéndela y confirma que se añaden nuevas filas.
-
-No ejecutes `railway run npm run db:import` desde tu PC con la URL privada: ese comando corre localmente y no equivale a estar dentro de Railway. Usa SSH para alcanzar la base interna.
-
-El importador copia el contenido completo en una transacción de destino y puede bloquear brevemente las consultas de esas tablas. La cámara debe permanecer detenida hasta que termine. Está pensado para el historial de este prototipo, no para una migración sin interrupciones de una base muy grande.
-
-El traslado de archivos no copia por sí mismo datos reales de una cuenta anterior. Para ejecutar esta importación se necesitan ambas conexiones y acceso al servicio de destino. Ningún recurso anterior se elimina automáticamente.
-
-## 11. Desarrollo y pruebas
+## 8. Desarrollo y pruebas
 
 Requiere Node 22. Desde `app`:
 
@@ -233,23 +186,7 @@ Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesita
 
 El paquete no incluye `node_modules`. Docker instala solo dependencias de producción con `npm ci`. No se ha compilado el sketch ni probado una cámara física desde este entorno.
 
-## 12. Problemas frecuentes
-
-| Síntoma | Qué revisar |
-|---|---|
-| El servicio no inicia | Variables obligatorias, referencia de `DATABASE_URL`, raíz `/app` y registros de arranque. |
-| Healthcheck falla | PostgreSQL aún arrancando, conexión incorrecta o modelo ausente. El servidor escucha después de preparar ambos. |
-| XIAO devuelve HTTP 401 | `CAMERA_TOKEN` distinto entre el servicio y `config.h`. |
-| HTTP 429 | Hay una captura en análisis. Se rechaza la adicional para evitar acumular imágenes en memoria. |
-| HTTP 413 o 415 | Imagen demasiado grande o contenido que no es JPEG válido. |
-| HTTP 503 | Fallo del análisis o de PostgreSQL; revisar los registros de Railway. |
-| Error de HTTPS | URL correcta, hora NTP y cadena de certificados; no desactivar la verificación como solución. |
-| No entra al monitor | Clave de acceso correcta y `NODE_ENV=production` con el dominio HTTPS. |
-| Sin datos recientes | Cámara sin conexión, servicio detenido, token incorrecto o más de 90 s sin lecturas. |
-| No aparecen filas nuevas en historial | Pulsa Actualizar historial; el estado actual y la tabla se refrescan por separado. |
-| Importación cancelada | Destino ocupado, esquema anterior incompatible o conexiones incorrectas; no se borra el destino para forzar la copia. |
-
-## 13. Librerías y funciones clave
+## 9. Librerías y funciones clave
 
 | Elemento | Uso |
 |---|---|
@@ -267,15 +204,29 @@ El paquete no incluye `node_modules`. Docker instala solo dependencias de produc
 | `CAPTURE_INTERVAL_MS` | Pausa de la XIAO entre envíos terminados; 15000 ms por defecto. |
 | `THRESHOLD` / `STALE_AFTER_SECONDS` | Umbral de decisión y antigüedad máxima de una lectura actual. |
 
-## 14. Operación y referencias
+## 10. Operación y resolución de problemas
 
-Railway cobra el uso del servicio y de la base según el plan y los créditos disponibles; esta entrega no garantiza alojamiento gratuito permanente. Consulta tu panel antes de mantener el sistema encendido de forma continua. El historial crece con cada captura; puedes configurar copias de seguridad del volumen de PostgreSQL en Railway.
+| Síntoma | Qué comprobar |
+|---|---|
+| `DATABASE_CA_CERT` ausente | Referencia a `AIVEN_CA_CERT` y certificado PEM completo |
+| Error de certificado TLS | CA del servicio correcto, nombre del host y fecha del certificado; no usar `rejectUnauthorized:false` |
+| HTTP 503 al enviar fotos | `INGEST_PAUSED=false`, salud de Aiven y registros del servidor |
+| Fallo del paso previo en nuevos despliegues | Retirar `npm run db:copy-to-aiven` después de la primera copia correcta |
+| Copia rechazada por destino ocupado | Confirmar si ya terminó; no vaciar datos para forzar una repetición |
+| JSON devuelve HTTP 401 | Volver a entrar al monitor; la sesión dura 12 horas |
+| JSON devuelve HTTP 429 | Esperar a que termine la otra exportación |
+| JSON interrumpido | Reintentar; no usar un archivo parcial como exportación válida |
+| Más de 90 s sin datos | Revisar alimentación, WiFi de 2,4 GHz, servicio Railway y base Aiven |
+| `sta is connecting` | Evitar iniciar conexiones WiFi repetidas mientras la conexión anterior sigue en curso |
 
-Documentación oficial de referencia:
+Para detener el sistema: apaga la XIAO y detén el servicio web. Si ya usa Aiven, detener el Postgres viejo de Railway no detiene la base nueva. Conserva respaldos y revisa los recursos que siguen asignados: un servicio offline no equivale necesariamente a costo total cero, especialmente si conserva almacenamiento o un plan contratado. Un push a la rama conectada puede volver a desplegar el servidor.
 
-- PostgreSQL: https://docs.railway.com/guides/postgresql
-- Dockerfiles: https://docs.railway.com/builds/dockerfiles
-- Healthchecks: https://docs.railway.com/guides/healthchecks
-- CLI y SSH: https://docs.railway.com/cli/ssh
-- Variables: https://docs.railway.com/guides/variables
+Aiven Free tiene límites y condiciones de disponibilidad; comprueba el plan actual en tu consola. Trasladar la base no vuelve gratuito el análisis en Railway. El historial sigue creciendo con cada captura; esta actualización no borra registros ni aplica retención automática.
 
+Documentación oficial:
+
+- Conexión Node.js y CA de Aiven: https://aiven.io/docs/products/postgresql/howto/connect-node
+- SSL en node-postgres: https://node-postgres.com/features/ssl
+- PG Studio: https://aiven.io/docs/products/postgresql/howto/pg-studio
+- Variables de Railway: https://docs.railway.com/guides/variables
+- Comandos previos al despliegue: https://docs.railway.com/guides/pre-deploy-command

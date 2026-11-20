@@ -6,7 +6,7 @@ let sourcePool, source, target;
 try {
   if (!process.env.SOURCE_DATABASE_URL || process.env.SOURCE_DATABASE_URL === process.env.DATABASE_URL)
     throw new Error('Configura SOURCE_DATABASE_URL del origen y DATABASE_URL de un destino distinto y vacio.');
-  sourcePool = createPool(process.env.SOURCE_DATABASE_URL);
+  sourcePool = createPool(process.env.SOURCE_DATABASE_URL, { caCertificate: process.env.SOURCE_DATABASE_CA_CERT || '' });
   await migrate(getPool());
   source = await sourcePool.connect(); target = await getPool().connect();
   const result = await importHistory(source, target);

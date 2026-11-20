@@ -6,6 +6,7 @@ import { settings } from './lib/config.js';
 import ingest from './api/ingest.js';
 import state from './api/state.js';
 import history from './api/history.js';
+import exportJSON from './api/export.js';
 import login from './api/login.js';
 import logout from './api/logout.js';
 import { validateAuthConfig } from './lib/auth.js';
@@ -28,10 +29,11 @@ try {
   console.log('Preparando tablas PostgreSQL...'); await migrate(getPool());
   console.log('Cargando y preparando el modelo...'); await loadModel();
   await predictRGB(new Uint8Array(224 * 224 * 3));
-  const routes = { '/api/ingest': ingest, '/api/state': state, '/api/history': history, '/api/login': login, '/api/logout': logout };
+  const routes = { '/api/ingest': ingest, '/api/state': state, '/api/history': history, '/api/export.json': exportJSON, '/api/login': login, '/api/logout': logout };
   server = createServer({ routes, health: () => query('SELECT 1') });
   await new Promise((resolve, reject) => { server.server.once('error', reject); server.server.listen(port, '0.0.0.0', resolve); });
   console.log('Servidor listo. Puerto ' + port + '. Modelo cargado y PostgreSQL conectado.');
+  if (process.env.INGEST_PAUSED === 'true') console.log('Recepcion de capturas pausada por mantenimiento.');
   process.once('SIGTERM', () => shutdown().catch(() => process.exit(1)));
   process.once('SIGINT', () => shutdown().catch(() => process.exit(1)));
 } catch (error) {
