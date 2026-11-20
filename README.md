@@ -150,6 +150,8 @@ El WiFi sigue configurándose en `config.h`. Esta entrega no implementa todavía
 4. El sistema suma Botellas + Papeles y Cartones + Bolsas. Así, un objeto puede alternar entre clases de residuos sin impedir la conclusión conjunta.
 5. Promedia hasta cinco capturas recientes. Empieza a evaluar con tres capturas y exige tres confirmaciones consecutivas.
 6. Con umbral de 80 %, concluye **Hay basura** si el promedio conjunto es ≥80 %, **Sin basura** si es ≤20 % y **No seguro** en la zona intermedia o durante la confirmación.
+
+La barra principal muestra la confianza estimada en la conclusión confirmada: el promedio de basura para **Hay basura**, o `1 − promedio de basura` para **Sin basura**. Por ejemplo, un promedio de basura del 10 % se presenta como 90 % de confianza de que no hay basura. Para **No seguro**, datos vencidos o un cambio de orientación pendiente, no se muestra un porcentaje de confianza. El panel de clases presenta por separado la suma de basura de la última captura y el promedio de las últimas capturas. Estas puntuaciones del modelo no son una garantía de acierto ni una medida de cantidad de residuos.
 7. El nuevo estado y la medición se guardan juntos en PostgreSQL. Si falla la escritura, no se da por guardado un estado parcial.
 
 Con evidencia consistente, la primera conclusión confirmada llega en la quinta captura. Un reinicio de la cámara, un corte largo o un cambio de umbral reinician la ventana de confirmación. Refrescar la web no añade mediciones.
