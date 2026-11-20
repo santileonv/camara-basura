@@ -2,9 +2,6 @@
 .chartsHeading,.chartToolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .chartsHeading h2{font-size:24px;margin:0}.chartsHeading .eyebrow{margin:0 0 8px}
 .chartToolbar{margin:20px 0 16px}.chartToolbar p{margin:0}
-.chartRanges{display:flex;gap:5px;background:#e8efe8;padding:4px;border-radius:11px}
-.chartRanges button{border:1px solid transparent;padding:9px 13px;white-space:nowrap;font-size:12px}
-.chartRanges [aria-pressed=true]{background:white;border-color:#cbd9cc;box-shadow:0 2px 5px #17362e0a}
 .chartCard{margin-top:18px;min-width:0}.chartCard h2{font-size:22px;margin-bottom:9px}.chartCard .eyebrow{margin:0 0 9px}
 .chartIntro{font-size:14px;line-height:1.7;color:#526c60;max-width:800px;margin:0 0 16px}
 .chartLegend{display:flex;gap:12px 18px;flex-wrap:wrap;align-items:center;margin:14px 0;font-size:12px;color:#526c60}
@@ -33,4 +30,13 @@
 .chartExplanation{font-size:12px;line-height:1.8;color:#526c60;margin:12px 1px 4px;overflow-wrap:anywhere}
 .thresholdGuide{font-size:12px;line-height:1.8;color:#526c60;border-left:3px solid #b8cabb;padding:8px 12px;background:#f8faf6;border-radius:0 7px 7px 0}
 .chartFootnote{margin:15px 3px}.chartEmpty{font-size:13px;color:#587065;padding:14px;background:#eaf0e8;border-radius:9px}.chartFailure{color:#ab342f!important}
-@media(max-width:720px){.chartsHeading h2{font-size:21px}.chartToolbar{align-items:start}.chartLegend{gap:10px 12px;font-size:11px}.chartCard{padding:20px 12px}.chartCard h2,.chartCard>.eyebrow,.chartCard>.chartIntro{margin-left:6px;margin-right:6px}.chartCard h2{font-size:20px}.chartIntro{font-size:13px}.chartRanges{max-width:100%}.chartRanges button{padding:9px 11px}.chartReadout{padding:13px;gap:16px 25px}.chartReadout strong{font-size:23px}.chartReadout .decisionTag{font-size:15px}.decisionAxis{font-size:12px}}
+@media(max-width:720px){.chartsHeading h2{font-size:21px}.chartToolbar{align-items:start}.chartLegend{gap:10px 12px;font-size:11px}.chartCard{padding:20px 12px}.chartCard h2,.chartCard>.eyebrow,.chartCard>.chartIntro{margin-left:6px;margin-right:6px}.chartCard h2{font-size:20px}.chartIntro{font-size:13px}.chartReadout{padding:13px;gap:16px 25px}.chartReadout strong{font-size:23px}.chartReadout .decisionTag{font-size:15px}.decisionAxis{font-size:12px}}
+
+.chartNavigation{display:flex;gap:8px;flex-wrap:wrap}.chartNavigation button{padding:10px 14px}
+#liveCharts[aria-pressed=true]{background:#e2f0e6;border-color:#70a185;color:#215f45}
+#chartRange{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.historyScroller{width:100%;height:27px;overflow-x:scroll;overflow-y:hidden;scroll-behavior:auto;scrollbar-color:#638d79 #e8eee6;border-radius:5px;background:#f3f6f1;overscroll-behavior-x:contain}
+.historyScrollContent{height:1px;min-width:100%}.historyScroller:focus-visible{outline:2px solid #4678be;outline-offset:3px}
+.historyScroller::-webkit-scrollbar{height:15px}.historyScroller::-webkit-scrollbar-track{background:#e8eee6;border-radius:6px}.historyScroller::-webkit-scrollbar-thumb{background:#638d79;border:3px solid #e8eee6;border-radius:7px;min-width:28px}
+.scrollLabels{display:flex;justify-content:space-between;gap:12px;color:#667a6e;font-size:11px;margin:5px 0 13px}
+@media(max-width:720px){.chartNavigation button{font-size:12px;padding:10px 11px}.scrollLabels{font-size:10px}.historyScroller{height:30px}}

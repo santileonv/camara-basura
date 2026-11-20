@@ -1,6 +1,16 @@
 // Datos originales del historial. No se recalculan las conclusiones del servidor.
 export const STATE_COLORS = { 'Hay basura': '#c66742', 'Sin basura': '#258263', 'No seguro': '#89968d' };
 
+// El deslizador representa todo el historial; la ventana visible no depende de presets.
+export function historyDomain(earliest, now, duration) {
+  return { from:Math.min(earliest ?? now - duration, now - duration), to:now };
+}
+export function windowAtOffset(domain, duration, fraction) {
+  const span = Math.min(duration, domain.to - domain.from);
+  const from = Math.round(domain.from + Math.max(0, Math.min(1, fraction)) * (domain.to - domain.from - span));
+  return { from, to:from + span };
+}
+
 export function mergeChartEntries(previous, incoming, from, to, limit = 6000) {
   const unique = new Map([...previous, ...incoming].map(row => [row.id, row]));
   return [...unique.values()].filter(row => row.receivedAt >= from && row.receivedAt <= to)

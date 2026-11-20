@@ -96,12 +96,13 @@ export function createStore(execute) {
     const entries = rows.slice(0, limit);
     return { entries, nextCursor: rows.length > limit ? entries.at(-1).id : null };
   }
-  // Consulta acotada; las actualizaciones siguientes solicitan solo IDs nuevos.
-  async function readChartHistory({ minutes = 15, after = null, now = Date.now() } = {}) {
-    if (![15, 60, 1440].includes(minutes) || !Number.isSafeInteger(now) || now <= 0 ||
+  // Ventana temporal libre. Cada respuesta queda acotada; nunca cargar toda la base en memoria.
+  async function readChartHistory({ now = Date.now(), minutes = 15, from = now - minutes * 60000, to = now, after = null, staleMs = 90000 } = {}) {
+    if (!Number.isSafeInteger(now) || now <= 0 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) ||
+      from < 0 || from >= to || to > now || !Number.isSafeInteger(staleMs) || staleMs <= 0 ||
       (after !== null && (!/^(0|[1-9]\d{0,18})$/.test(after) || BigInt(after) > 9223372036854775807n)))
       throw Object.assign(new Error('Intervalo o cursor de graficos invalido.'), { status: 400 });
-    const from = now - minutes * 60000, limit = 6000;
+    const limit = 6000;
     const rows = await execute(`SELECT id::text AS id,
       (extract(epoch FROM recibido_en) * 1000)::double precision AS "receivedAt",
       conclusion, ARRAY[p_sin_basura, p_botellas, p_papeles_cartones, p_bolsas] AS scores,
@@ -111,9 +112,20 @@ export function createStore(execute) {
       AND recibido_en >= to_timestamp($2::double precision / 1000.0)
       AND recibido_en <= to_timestamp($3::double precision / 1000.0)
       AND ($4::bigint IS NULL OR id > $4::bigint)
-      ORDER BY id DESC LIMIT 6001`, [CAMERA_ID, from, now, after]);
+      ORDER BY id DESC LIMIT 6001`, [CAMERA_ID, from, to, after]);
+    // El limite inicial permite recorrer todos los dias guardados, sin un tope de 24 horas.
+    // No repetir esta consulta en cada actualizacion incremental en vivo.
+    const extent = after === null ? (await execute(`SELECT
+      (extract(epoch FROM min(recibido_en)) * 1000)::double precision AS "earliestAt"
+      FROM mediciones WHERE camara_id = $1`, [CAMERA_ID]))[0] : null;
+    const context = (await execute(`SELECT
+      (extract(epoch FROM recibido_en) * 1000)::double precision AS "receivedAt", conclusion
+      FROM mediciones WHERE camara_id = $1
+      AND recibido_en < to_timestamp($2::double precision / 1000.0)
+      AND recibido_en >= to_timestamp($3::double precision / 1000.0)
+      ORDER BY recibido_en DESC, id DESC LIMIT 1`, [CAMERA_ID, from, Math.max(0, from - staleMs)]))[0] ?? null;
     return { entries: rows.slice(0, limit).reverse(), cursor: rows[0]?.id ?? after ?? '0',
-      from, to: now, truncated: rows.length > limit, limit };
+      from, to, ...(extent ? {earliestAt:extent.earliestAt} : {}), context, truncated: rows.length > limit, limit };
   }
   return { readState, saveReading, readHistory, readChartHistory, readCameraSettings, readCameraView, setOrientation };
 }

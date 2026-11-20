@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, decisionStepSegments, decisionStepPath } from '../public/chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, decisionStepSegments, decisionStepPath, historyDomain, windowAtOffset } from '../public/chart-data.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
 import { createSession } from '../lib/auth.js';
 import { createStore } from '../lib/store.js';
@@ -31,30 +31,49 @@ test('Cortes de red rompen las lineas y dejan huecos en la franja; No seguro sig
 
 test('API publica de graficos valida intervalos y cursores y admite actualizaciones incrementales', async () => {
   process.env.SESSION_SECRET = 'charts-session-test-'.repeat(3);
+  const now = 100 * 86400000;
   let calls = [];
-  const handler = createChartHistoryHandler(async query => { calls.push(query); return { entries:[],cursor:query.after ?? '0',from:1,to:1000000,truncated:false,limit:6000 }; }, () => 1000000);
+  const handler = createChartHistoryHandler(async query => { calls.push(query); return { entries:[],cursor:query.after ?? '0',from:1,to:1000000,truncated:false,limit:6000 }; }, () => now);
   const request = async (url, cookie = '', method = 'GET') => {
     let data; const headers = {}; const res = { setHeader(name, value) { headers[name] = value; }, end(value) { data = JSON.parse(value); } };
     await handler({ method, url, headers:{cookie} }, res); return { status:res.statusCode,data,headers };
   };
   assert.equal((await request('/api/chart-history')).status, 200); assert.equal(calls.length, 1); calls = [];
   const cookie = 'xiao_session=' + createSession();
-  for (const suffix of ['minutes=0', 'minutes=120', 'after=-1', 'after=1e2', 'after=9223372036854775808'])
+  for (const suffix of ['minutes=0', 'minutes=NaN', 'minutes=Infinity', 'minutes=-1', 'after=-1', 'after=1e2', 'after=9223372036854775808',
+    'from=1', 'to=10', 'from=20&to=10', 'from=-1&to=10', 'from=1&to=' + (now+1), 'from=1e2&to=1000', 'from=&to=10'])
     assert.equal((await request('/api/chart-history?' + suffix, cookie)).status, 400);
   assert.equal((await request('/api/chart-history', cookie, 'POST')).status, 405); assert.equal(calls.length, 0);
   const response = await request('/api/chart-history?minutes=1440&after=9007199254740993', cookie);
   assert.equal(response.status, 200); assert.equal(response.data.cursor, '9007199254740993');
-  assert.deepEqual(calls[0], { minutes:1440,after:'9007199254740993',now:1000000 });
+  assert.deepEqual(calls[0], { minutes:1440,after:'9007199254740993',now,staleMs:90000 });
   assert.match(response.headers['Cache-Control'], /no-store/); assert.equal(response.data.staleMs, 90000);
+  // Cualquier intervalo valido, no solo 15 min / 1 h / 24 h.
+  assert.equal((await request('/api/chart-history?minutes=7.5')).status, 200);
+  assert.equal((await request('/api/chart-history?from=1&to=999999')).status, 200);
+  assert.deepEqual(calls.at(-1), {from:1,to:999999,after:null,now,staleMs:90000});
 });
 
 test('El historial para graficos limita la respuesta sin redondear el cursor de PostgreSQL', async () => {
   const rows = Array.from({length:6001}, (_, i) => ({ id:String(9007199254747999n - BigInt(i)),receivedAt:1000 + i }));
-  const store = createStore(async () => rows);
+  const store = createStore(async sql => sql.includes('LIMIT 6001') ? rows : sql.includes('min(recibido_en)') ? [{earliestAt:1000}] : []);
   const result = await store.readChartHistory({ now:1000000 });
   assert.equal(result.entries.length, 6000); assert.equal(result.truncated, true);
   assert.equal(result.cursor, '9007199254747999');
-  await assert.rejects(store.readChartHistory({ minutes:2 }), error => error.status === 400);
+  assert.equal(result.earliestAt, 1000); assert.equal(result.context, null);
+  await assert.rejects(store.readChartHistory({ from:20,to:10 }), error => error.status === 400);
+});
+
+test('Desplazamiento libre: alcanza dias antiguos, conserva el ancho y sincroniza extremos sin presets', () => {
+  const now = 100 * 86400000, first = now - 45 * 86400000, duration = 7.5 * 60000;
+  const extent = historyDomain(first, now, duration);
+  assert.equal(windowAtOffset(extent,duration,0).from, first);
+  assert.equal(windowAtOffset(extent,duration,1).to, now);
+  const middle = windowAtOffset(extent,duration,.37);
+  assert.equal(middle.to-middle.from,duration); assert.ok(now-middle.to>24*3600000);
+  assert.deepEqual(windowAtOffset(extent,duration,-1),windowAtOffset(extent,duration,0));
+  assert.deepEqual(windowAtOffset(extent,duration,2),windowAtOffset(extent,duration,1));
+  assert.deepEqual(windowAtOffset(historyDomain(null,now,duration),duration,0),{from:now-duration,to:now});
 });
 
 test('Escalones: saltos verticales en la hora confirmada, sin convertir incertidumbre o desconexion en Sin basura', () => {
