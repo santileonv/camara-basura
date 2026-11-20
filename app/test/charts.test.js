@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, decisionStepSegments, decisionStepPath, historyDomain, windowAtOffset } from '../public/chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, decisionStepSegments, decisionStepPath, historyDomain, windowAtOffset, localDayKey, localDayBounds, clampDayWindow } from '../public/chart-data.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
 import { createSession } from '../lib/auth.js';
 import { createStore } from '../lib/store.js';
@@ -74,6 +74,29 @@ test('Desplazamiento libre: alcanza dias antiguos, conserva el ancho y sincroniz
   assert.deepEqual(windowAtOffset(extent,duration,-1),windowAtOffset(extent,duration,0));
   assert.deepEqual(windowAtOffset(extent,duration,2),windowAtOffset(extent,duration,1));
   assert.deepEqual(windowAtOffset(historyDomain(null,now,duration),duration,0),{from:now-duration,to:now});
+});
+
+test('Navegacion diaria: fecha valida, extremos 00-24, intervalos y zoom siempre dentro del dia elegido', () => {
+  const day = localDayBounds('2026-11-18');
+  assert.equal(localDayKey(day.from), '2026-11-18');
+  assert.equal(localDayKey(day.to), '2026-11-19');
+  assert.equal(localDayBounds('2026-02-30'), null); assert.equal(localDayBounds('18/11/2026'), null);
+  const first = windowAtOffset(day, 15 * 60000, 0), last = windowAtOffset(day, 15 * 60000, 1);
+  assert.equal(first.from, day.from); assert.equal(last.to, day.to);
+  assert.deepEqual(clampDayWindow(day, 3600000, day.from - 1), {from:day.from,to:day.from + 3600000});
+  assert.deepEqual(clampDayWindow(day, 3600000, day.to + 1), {from:day.to - 3600000,to:day.to});
+  assert.deepEqual(clampDayWindow(day, 2 * 86400000, day.to), day);
+});
+
+test('El calendario local respeta cambios de hora de Chile sin mezclar fechas vecinas', () => {
+  const previous = process.env.TZ; process.env.TZ = 'America/Santiago';
+  try {
+    const short = localDayBounds('2026-09-06'), long = localDayBounds('2026-04-04');
+    assert.equal(short.to - short.from, 23 * 3600000);
+    assert.equal(long.to - long.from, 25 * 3600000);
+    assert.equal(localDayKey(short.to - 1), '2026-09-06'); assert.equal(localDayKey(short.to), '2026-09-07');
+    assert.equal(localDayKey(long.to - 1), '2026-04-04'); assert.equal(localDayKey(long.to), '2026-04-05');
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });
 
 test('Escalones: saltos verticales en la hora confirmada, sin convertir incertidumbre o desconexion en Sin basura', () => {

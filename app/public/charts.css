@@ -33,6 +33,16 @@
 @media(max-width:720px){.chartsHeading h2{font-size:21px}.chartToolbar{align-items:start}.chartLegend{gap:10px 12px;font-size:11px}.chartCard{padding:20px 12px}.chartCard h2,.chartCard>.eyebrow,.chartCard>.chartIntro{margin-left:6px;margin-right:6px}.chartCard h2{font-size:20px}.chartIntro{font-size:13px}.chartReadout{padding:13px;gap:16px 25px}.chartReadout strong{font-size:23px}.chartReadout .decisionTag{font-size:15px}.decisionAxis{font-size:12px}}
 
 .chartNavigation{display:flex;gap:8px;flex-wrap:wrap}.chartNavigation button{padding:10px 14px}
+.chartControls{margin:20px 0;background:white;border:1px solid #dbe5dc;border-radius:14px;padding:20px}
+.chartControlRow{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}.chartControlRow+.chartControlRow{margin-top:18px}
+.dayPicker,.intervalPicker{display:flex;flex-direction:column;gap:8px}.dayPicker label,.controlLabel{font-size:12px;font-weight:650;color:#526c60}
+.dayPickerFields{display:flex;align-items:center;gap:7px}.dayPickerFields button{padding:10px 13px;min-height:43px}
+.dayPickerFields input{width:170px;min-width:0;padding:10px 11px;font-size:14px;color:#17362e;background:white;min-height:43px;color-scheme:light}
+.chartRanges{display:flex;gap:5px;flex-wrap:wrap;background:#f0f4ed;padding:4px;border-radius:10px}
+.chartRanges button{padding:9px 12px;border-color:transparent;font-size:12px;min-height:38px}.chartRanges [aria-pressed=true]{background:#245846;color:white;border-color:#245846}
+.chartViewStatus{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid #e3ebe1;padding-top:14px;color:#526c60;font-size:12px}
+#chartMode{background:#edf3e9;color:#315f4c;border-radius:6px;padding:6px 9px;font-weight:650}.chartControls #chartStatus{margin-bottom:0}
+.chartControls .error{margin:10px 0}.chartFutureLabel{fill:#64758a;font:11px Inter,system-ui,sans-serif}.decisionTag.future{color:#536c89;background:#edf2f8}
 #liveCharts[aria-pressed=true]{background:#e2f0e6;border-color:#70a185;color:#215f45}
 #chartRange{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .historyScroller{width:100%;height:27px;overflow-x:scroll;overflow-y:hidden;scroll-behavior:auto;scrollbar-color:#638d79 #e8eee6;border-radius:5px;background:#f3f6f1;overscroll-behavior-x:contain}
@@ -40,3 +50,4 @@
 .historyScroller::-webkit-scrollbar{height:15px}.historyScroller::-webkit-scrollbar-track{background:#e8eee6;border-radius:6px}.historyScroller::-webkit-scrollbar-thumb{background:#638d79;border:3px solid #e8eee6;border-radius:7px;min-width:28px}
 .scrollLabels{display:flex;justify-content:space-between;gap:12px;color:#667a6e;font-size:11px;margin:5px 0 13px}
 @media(max-width:720px){.chartNavigation button{font-size:12px;padding:10px 11px}.scrollLabels{font-size:10px}.historyScroller{height:30px}}
+@media(max-width:720px){.chartControls{padding:14px}.dayPickerFields{gap:5px}.dayPickerFields input{width:153px}.chartRanges{width:100%}.chartRanges button{font-size:11px;padding:9px}.chartControlRow{gap:12px}.chartViewStatus{align-items:flex-start;flex-direction:column}}

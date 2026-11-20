@@ -11,6 +11,24 @@ export function windowAtOffset(domain, duration, fraction) {
   return { from, to:from + span };
 }
 
+export function localDayKey(timestamp) {
+  const value = new Date(timestamp);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+export function localDayBounds(key) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const [year, month, day] = key.split('-').map(Number);
+  const start = new Date(year, month - 1, day);
+  if (localDayKey(start) !== key) return null;
+  // Usar el calendario local, no sumar 86400000: los cambios de hora dan dias de 23/25 h.
+  return { from:start.getTime(), to:new Date(year, month - 1, day + 1).getTime() };
+}
+export function clampDayWindow(day, duration, end) {
+  const span = Math.min(duration, day.to - day.from);
+  const to = Math.max(day.from + span, Math.min(day.to, end));
+  return { from:to - span, to };
+}
+
 export function mergeChartEntries(previous, incoming, from, to, limit = 6000) {
   const unique = new Map([...previous, ...incoming].map(row => [row.id, row]));
   return [...unique.values()].filter(row => row.receivedAt >= from && row.receivedAt <= to)
