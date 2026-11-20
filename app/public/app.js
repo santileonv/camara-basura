@@ -12,16 +12,10 @@ const rows = labels.map(label => {
   const fill = document.createElement('div'); bar.append(fill); title.append(name, value); row.append(title, bar); $('classes').append(row);
   return { value, fill };
 });
-let canManageCamera = false, timer, busy = false, last = null, staleMs = 90000;
-let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false, sessionEpoch = 0;
-let camera = { rotation: 0, version: '0' }, cameraKnown = false, cameraBusy = false;
+let timer, busy = false, last = null, staleMs = 90000;
+let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false;
+let camera = { rotation: 180, version: '0' }, cameraKnown = false;
 const percent = value => (100 * value).toFixed(1) + ' %';
-function setCameraAccess(value) {
-  if (canManageCamera !== value) sessionEpoch++;
-  canManageCamera = value;
-  $('logout').hidden = !value; $('rotateCamera').hidden = !value;
-  $('rotateCamera').disabled = !value || !cameraKnown || cameraBusy;
-}
 function acceptCamera(next) {
   // Una respuesta atrasada de otra consulta no deshace el cambio recien guardado.
   if (cameraKnown && BigInt(next.version) < BigInt(camera.version)) return;
@@ -30,10 +24,7 @@ function acceptCamera(next) {
 function render() {
   const pending = last && cameraKnown && ((last.orientationVersion ?? '0') !== camera.version || (last.rotation ?? 0) !== camera.rotation);
   const fresh = last && !pending && Date.now() - last.receivedAt <= staleMs;
-  $('rotateCamera').disabled = !canManageCamera || !cameraKnown || cameraBusy;
-  $('rotateCamera').textContent = cameraBusy ? 'Guardando giro…' : (camera.rotation === 180 ? 'Restaurar posición normal' : 'Invertir cámara · 180°');
-  $('rotateCamera').setAttribute('aria-pressed', String(camera.rotation === 180));
-  $('orientationStatus').textContent = cameraKnown ? (camera.rotation === 180 ? 'Orientación: girada 180°.' : 'Orientación: normal.') +
+  $('orientationStatus').textContent = cameraKnown ? 'Orientación fija: girada 180°.' +
     (pending ? ' Esperando una nueva captura para actualizar el análisis.' : ' El giro se aplica a la imagen y al análisis.') : 'Consultando orientación…';
   $('photo').classList.toggle('upsideDown', !!last && cameraKnown && camera.rotation !== (last.rotation ?? 0));
   const age = last ? Math.max(0, Math.floor((Date.now() - last.receivedAt) / 1000)) : null;
@@ -72,14 +63,11 @@ async function poll() {
   clearTimeout(timer);
   if (busy || document.hidden) return;
   busy = true;
-  const epoch = sessionEpoch;
   try {
     const response = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
-    if (epoch !== sessionEpoch) return;
     const data = await response.json();
-    if (epoch !== sessionEpoch) return;
     if (!response.ok) throw new Error(data.error || 'No se pudo consultar el servidor.');
-    acceptCamera(data.camera); setCameraAccess(data.canManageCamera === true); last = data.state; staleMs = data.staleMs;
+    acceptCamera(data.camera); last = data.state; staleMs = data.staleMs;
     if (last?.preview) {
       const source = 'data:image/jpeg;base64,' + last.preview;
       if ($('photo').getAttribute('src') !== source) $('photo').src = source;
@@ -88,34 +76,12 @@ async function poll() {
     $('notice').textContent = ''; render();
     if (!historyLoaded && !historyBusy) loadHistory(true);
   } catch (error) {
-    if (epoch !== sessionEpoch) return;
     last = null; render(); $('notice').textContent = error.message || 'No se pudo conectar. Intenta nuevamente.';
   } finally {
     busy = false;
     if (!document.hidden) timer = setTimeout(poll, 15000);
   }
 }
-$('rotateCamera').onclick = async () => {
-  if (!canManageCamera || !cameraKnown || cameraBusy) return;
-  const epoch = sessionEpoch;
-  const change = { rotation: camera.rotation === 180 ? 0 : 180, expectedVersion: camera.version };
-  cameraBusy = true; $('cameraError').textContent = ''; render();
-  try {
-    const response = await fetch('/api/camera-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(change), signal: AbortSignal.timeout(15000) });
-    if (epoch !== sessionEpoch || !canManageCamera) return;
-    if (response.status === 401) { setCameraAccess(false); render(); $('cameraError').textContent = 'La sesión de administración venció. Vuelve a entrar desde Administración.'; return; }
-    const data = await response.json();
-    if (epoch !== sessionEpoch || !canManageCamera) return;
-    if (!response.ok) throw new Error(data.error || 'No se pudo guardar el giro.');
-    acceptCamera(data.camera);
-  } catch (error) {
-    if (epoch === sessionEpoch && canManageCamera) $('cameraError').textContent = error.message || 'No se pudo confirmar el giro. Actualiza para comprobar la orientación guardada.';
-  } finally {
-    cameraBusy = false;
-    if (epoch === sessionEpoch && canManageCamera) { render(); await poll(); }
-  }
-};
 async function loadHistory(reset = false) {
   if (historyBusy) return;
   historyBusy = true;
@@ -147,13 +113,6 @@ async function loadHistory(reset = false) {
 }
 $('refreshHistory').onclick = () => loadHistory(true);
 $('moreHistory').onclick = () => loadHistory(false);
-$('logout').onclick = async () => {
-  try {
-    const response = await fetch('/api/logout', { method:'POST', signal:AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error('No se pudo cerrar la administración.');
-    setCameraAccess(false); render(); await poll();
-  } catch (error) { $('notice').textContent = error.message || 'No se pudo conectar.'; }
-};
 document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) poll(); });
 setInterval(() => { if (!document.hidden) render(); }, 1000);
 charts.start();

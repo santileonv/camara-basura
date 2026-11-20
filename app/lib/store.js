@@ -66,7 +66,7 @@ export function createStore(execute) {
   }
   async function readState() { return (await readVersionedState()).estado; }
   async function saveReading(reading, config) {
-    reading = { ...reading, rotation: reading.rotation ?? 0, orientationVersion: reading.orientationVersion ?? '0' };
+    reading = { ...reading, rotation: reading.rotation ?? 180, orientationVersion: reading.orientationVersion ?? '0' };
     for (let attempt = 0; attempt < 5; attempt++) {
       const camera = await readCameraSettings();
       if (camera.version !== reading.orientationVersion || camera.rotation !== reading.rotation)

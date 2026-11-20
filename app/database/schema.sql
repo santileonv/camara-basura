@@ -15,8 +15,19 @@ ON CONFLICT (id) DO NOTHING;
 -- La orientacion es compartida por el analisis y todos los monitores.
 -- La version impide guardar una inferencia iniciada antes de cambiar el giro.
 ALTER TABLE camaras
-  ADD COLUMN IF NOT EXISTS rotacion smallint NOT NULL DEFAULT 0 CHECK (rotacion IN (0, 180)),
+  ADD COLUMN IF NOT EXISTS rotacion smallint NOT NULL DEFAULT 180 CHECK (rotacion IN (0, 180)),
   ADD COLUMN IF NOT EXISTS orientacion_version bigint NOT NULL DEFAULT 0 CHECK (orientacion_version >= 0);
+
+-- El montaje usa siempre 180 grados. Solo incrementar la version si cambia
+-- la orientacion anterior, para que el siguiente analisis reinicie su promedio.
+ALTER TABLE camaras ALTER COLUMN rotacion SET DEFAULT 180;
+UPDATE camaras SET rotacion = 180, orientacion_version = orientacion_version + 1
+WHERE rotacion <> 180;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'camaras'::regclass AND conname = 'camaras_rotacion_fija') THEN
+    ALTER TABLE camaras ADD CONSTRAINT camaras_rotacion_fija CHECK (rotacion = 180);
+  END IF;
+END $$;
 
 -- Solo una fila por camara: ventana de promedio y ultima miniatura.
 CREATE TABLE IF NOT EXISTS estado_camara (

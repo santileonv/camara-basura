@@ -4,7 +4,7 @@ Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor es público y se puede abrir desde cualquier red, sin clave de consulta. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-La versión 3.2 añade un botón para invertir la cámara 180°, con la orientación aplicada tanto al análisis como a la miniatura y guardada en PostgreSQL. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
+La cámara mantiene una rotación fija de 180°, aplicada tanto al análisis como a la miniatura y guardada en PostgreSQL. No hay controles de giro ni acceso de administración en la página. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
 
 **Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
@@ -23,15 +23,19 @@ La página principal muestra la cámara, la conclusión, los porcentajes, el his
 
 No hay botones de descarga JSON ni CSV. `GET /api/export.json` ya no está registrado en el servidor y el antiguo handler responde 404 incluso con una sesión anterior. Los respaldos y exportaciones del propietario se realizan directamente en Aiven o con una herramienta PostgreSQL, fuera del monitor público.
 
-Para ajustar la cámara, el propietario abre **https://xiao-monitor-production.up.railway.app/admin** e ingresa la clave anterior (`DASHBOARD_PASSWORD`). Regresa al monitor con el botón de giro y **Salir de administración** disponibles solo en esa sesión. El giro sigue comprobando la autorización en el servidor; ocultar el botón no es la protección de la ruta. `CAMERA_TOKEN` continúa siendo obligatorio para enviar fotos. `DASHBOARD_PASSWORD` y `SESSION_SECRET` se usan juntos para la administración; si ambos se omiten, el monitor funciona como consulta pública sin controles de ajuste.
+## Orientación fija de la cámara
 
-## Orientar la cámara desde el monitor
+El montaje usa siempre **180 grados**. El servidor gira la imagen antes del recorte y del modelo; la miniatura usa la misma orientación. La migración de inicio establece `camaras.rotacion=180` y una restricción PostgreSQL impide volver a 0 grados. La versión de orientación aumenta solamente si fue necesario cambiar el valor anterior; los siguientes reinicios conservan la versión y el promedio.
 
-Después de acceder a administración, debajo de la última foto, **Invertir cámara · 180°** alterna entre la posición normal y una rotación de 180 grados. La elección se guarda en PostgreSQL para esa cámara y se comparte entre dispositivos; no requiere cambiar el firmware. Cuando está invertida, el botón permite **Restaurar posición normal**.
+La actualización no borra mediciones. Si cambia una orientación anterior de 0 a 180, la siguiente captura reinicia su ventana de promedio y confirmaciones para no mezclar imágenes. Hasta que llegue, el monitor indica que espera una captura corregida. La imagen previa también se muestra girada.
 
-El servidor gira la imagen antes del recorte y de ejecutar el modelo. La miniatura utiliza el mismo giro. Al cambiarlo, la foto anterior se muestra girada mientras llega la nueva; los porcentajes y la conclusión esperan la captura corregida. El promedio y las confirmaciones empiezan de nuevo para evitar mezclar orientaciones. Las mediciones anteriores se conservan.
+El monitor no contiene botones de giro. `/admin`, `/admin.js`, `/api/login` y `/api/logout` se retiraron de las rutas. El antiguo `/api/camera-settings` devuelve 410 sin leer ni modificar la base, incluso si el navegador conserva una sesión anterior. La recepción de imágenes sigue exigiendo `CAMERA_TOKEN`.
 
-La ruta `POST /api/camera-settings` exige sesión y el mismo origen. Una versión de configuración evita que una consulta atrasada o una inferencia en curso sobrescriban la orientación elegida. Las columnas `camaras.rotacion` y `camaras.orientacion_version` se incorporan automáticamente al arrancar, con orientación inicial normal para instalaciones anteriores. Los registros originales de la base no se modifican ni se reinterpretan.
+## Archivos de configuración y secretos
+
+`.gitignore` excluye `node_modules/`, `.env`, `.env.*`, `config.h`, `ca.pem` y `Config_XIAO_Railway.txt`; conserva `.env.example` como plantilla. La plantilla contiene únicamente marcadores ficticios para la conexión y el token. En este proyecto `DATABASE_CA_CERT` corresponde al certificado CA y `CAMERA_TOKEN` cumple el papel de la API_KEY del dispositivo. Las credenciales reales se configuran en las variables privadas de Railway y en el `config.h` local de la XIAO. La imagen Docker también excluye archivos `.env` y `ca.pem`.
+
+Añadir un archivo a `.gitignore` no elimina una copia que ya estuviera registrada. Si se expone una credencial, hay que rotarla; borrar el archivo no anula el secreto ni su historial.
 
 ## Gráficos en tiempo real
 
@@ -43,7 +47,7 @@ Debajo de la cámara hay tres vistas del mismo historial:
 
 El selector permite consultar 15 minutos, 1 hora o 24 horas. El cursor, el toque y las flechas del teclado permiten inspeccionar valores y tramos. Se muestran horas locales del dispositivo. Los gráficos conservan las conclusiones registradas: no las recalculan con la configuración actual.
 
-`GET /api/chart-history` es una consulta pública y limita cada respuesta a 6000 mediciones, sin fotos. Tras la carga inicial, solicita cada 15 segundos solo IDs nuevos; deduplica las filas y descarta las que salen del intervalo. Los IDs permanecen como texto para preservar BIGINT. Cambiar de intervalo cancela la consulta anterior; ocultar la pestaña suspende las consultas. Salir de administración conserva la vista pública y retira los controles de ajuste. No añade dependencias externas ni cambia el modelo, firmware o esquema de la base.
+`GET /api/chart-history` es una consulta pública y limita cada respuesta a 6000 mediciones, sin fotos. Tras la carga inicial, solicita cada 15 segundos solo IDs nuevos; deduplica las filas y descarta las que salen del intervalo. Los IDs permanecen como texto para preservar BIGINT. Cambiar de intervalo cancela la consulta anterior; ocultar la pestaña suspende las consultas. El monitor es solo de consulta y no utiliza sesiones de administración. No añade dependencias externas ni cambia el modelo, firmware o esquema de la base.
 
 Las líneas se interrumpen cuando la separación supera `STALE_AFTER_SECONDS`. La franja prolonga cada conclusión hasta la siguiente medición o hasta que venza ese plazo, lo que ocurra antes. Si se alcanza el límite de 6000 filas, la interfaz lo indica; el propietario puede consultar los registros completos directamente en Aiven.
 
@@ -109,7 +113,7 @@ El origen se lee en una instantánea de solo lectura. La copia de datos del dest
 | `DATABASE_REQUIRE_TLS` | `true` |
 | `INGEST_PAUSED` | `false` |
 
-3. Conserva `AIVEN_DATABASE_URL` y `AIVEN_CA_CERT`: las referencias finales dependen de ellas. Mantén `CAMERA_TOKEN`, `DASHBOARD_PASSWORD` y `SESSION_SECRET` sin cambios.
+3. Conserva `AIVEN_DATABASE_URL` y `AIVEN_CA_CERT`: las referencias finales dependen de ellas. Mantén `CAMERA_TOKEN` sin cambios. Las antiguas variables de acceso al monitor no se usan.
 4. Despliega y espera **SUCCESS**. Verifica `/healthz`, el historial y una descarga JSON. Los conteos y los valores anteriores deben coincidir.
 5. Enciende la XIAO y comprueba `HTTP 200`. Actualiza el historial y confirma que se agregan registros nuevos con IDs posteriores.
 6. Solo después de comprobar el traspaso puedes detener el servicio `Postgres` original. Conserva el volumen y un respaldo mientras verificas el funcionamiento; no hace falta eliminarlo para completar la migración.
@@ -179,7 +183,7 @@ Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**.
 |---|---|
 | `lib/raw-export.js` | Lee todas las mediciones por lotes en una instantánea de solo lectura |
 | `api/export.js` | Handler retirado; responde 404 y no lee la base |
-| `public/admin.html` / `admin.js` | Acceso del propietario para habilitar los controles de cámara |
+| `api/camera-settings.js` | Ajuste retirado; devuelve 410 y conserva el montaje fijo |
 | `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
 | `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
 | `scripts/import-history.js` | Importador general: `SOURCE_DATABASE_URL` → `DATABASE_URL` |
@@ -198,15 +202,15 @@ npm test
 npm run check-model
 ```
 
-Para ejecutar el servidor localmente, copia `.env.example` como `.env`, completa las variables con una conexión PostgreSQL accesible desde tu equipo y usa `NODE_ENV=development` para una sesión HTTP local:
+Para ejecutar el servidor localmente, copia `.env.example` como `.env`, completa las variables con una conexión PostgreSQL accesible desde tu equipo y usa `NODE_ENV=development` para HTTP local:
 
 ```bash
 npm run dev
 ```
 
-Abre `http://localhost:3000`. Para producción mantén `NODE_ENV=production` y HTTPS. Las cookies de producción son `Secure`, `HttpOnly` y `SameSite=Strict`.
+Abre `http://localhost:3000`. Para producción mantén `NODE_ENV=production` y HTTPS. El monitor público no necesita cookies ni clave de consulta.
 
-Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, administración protegida, exportación web retirada, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
+Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, orientación fija, ajuste y exportación web retirados, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
 
 El paquete no incluye `node_modules`. Docker instala solo dependencias de producción con `npm ci`. No se ha compilado el sketch ni probado una cámara física desde este entorno.
 
@@ -238,7 +242,7 @@ El paquete no incluye `node_modules`. Docker instala solo dependencias de produc
 | Fallo del paso previo en nuevos despliegues | Retirar `npm run db:copy-to-aiven` después de la primera copia correcta |
 | Copia rechazada por destino ocupado | Confirmar si ya terminó; no vaciar datos para forzar una repetición |
 | Exportación web devuelve HTTP 404 | Es intencional: la descarga se retiró del monitor público |
-| No aparece el botón de giro | Entrar en `/admin`; la consulta pública no permite cambiar la orientación |
+| No aparece el botón de giro | Es intencional: la rotación está fijada en 180 grados |
 | Más de 90 s sin datos | Revisar alimentación, WiFi de 2,4 GHz, servicio Railway y base Aiven |
 | `sta is connecting` | Evitar iniciar conexiones WiFi repetidas mientras la conexión anterior sigue en curso |
 

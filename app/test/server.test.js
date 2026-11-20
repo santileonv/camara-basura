@@ -9,8 +9,6 @@ import { createIngestHandler } from '../api/ingest.js';
 import { createStateHandler } from '../api/state.js';
 import { createHistoryHandler } from '../api/history.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
-import login from '../api/login.js';
-import logout from '../api/logout.js';
 import { classify } from '../lib/model.js';
 
 test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y salud', async () => {
@@ -25,8 +23,7 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     let healthy = true;
     const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading,store.readCameraSettings),
       '/api/state':createStateHandler(store.readCameraView),'/api/history':createHistoryHandler(store.readHistory),
-      '/api/chart-history':createChartHistoryHandler(store.readChartHistory),
-      '/api/login':login,'/api/logout':logout};
+      '/api/chart-history':createChartHistoryHandler(store.readChartHistory)};
     app=createServer({routes,health:async()=>{if(!healthy)throw new Error('test-health');await db.query('SELECT 1');}});
     await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});
     const base='http://127.0.0.1:'+app.server.address().port;
@@ -38,14 +35,11 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal((await request('/api/state')).status,200);
     assert.equal((await request('/api/history')).status,200);
     assert.equal((await request('/api/chart-history')).status,200);
-    for(const path of ['/charts.js','/chart-data.js','/charts.css','/admin','/admin.js']) assert.equal((await request(path)).status,200);
+    for(const path of ['/charts.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
-    for(const path of ['/api/export.json','/api/export.csv','/history-format.js']) assert.equal((await request(path)).status,404);
+    for(const path of ['/api/export.json','/api/export.csv','/history-format.js','/admin','/admin.js']) assert.equal((await request(path)).status,404);
     assert.doesNotMatch(await(await request('/')).text(),/type="password"|Descargar|exportJSON|exportHistory/);
-    const logged=await request('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:process.env.DASHBOARD_PASSWORD})});
-    assert.equal(logged.status,200);
-    assert.match(logged.headers.get('set-cookie'),/HttpOnly; SameSite=Strict.*Secure/);
-    const cookie=logged.headers.get('set-cookie').split(';')[0];
+    const cookie='xiao_session=sesion-anterior';
     const jpeg=await sharp({create:{width:800,height:600,channels:3,background:'#8f7357'}}).jpeg().toBuffer();
     for(let seq=1;seq<=5;seq++){
       const result=await request('/api/ingest',{method:'POST',headers:{authorization:'Bearer '+process.env.CAMERA_TOKEN,
@@ -53,7 +47,7 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
       assert.equal(result.status,200,await result.text());
     }
     const state=await(await request('/api/state',{headers:{cookie}})).json();
-    assert.equal(state.canManageCamera,true);assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
+    assert.equal(state.canManageCamera,false);assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
     const publicState=await(await request('/api/state')).json();assert.equal(publicState.canManageCamera,false);assert.equal(publicState.state.scores.length,4);
     const history=await(await request('/api/history?limit=2')).json();
     assert.equal(history.entries.length,2);assert.ok(history.nextCursor);
@@ -61,7 +55,7 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal(graph.entries.length,5);assert.equal(graph.entries[0].scores.length,4);
     assert.equal(Number((await db.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),5);
     healthy=false;assert.equal((await request('/healthz')).status,503);
-    assert.equal((await request('/api/logout',{method:'POST',headers:{cookie}})).status,200);
+    assert.equal((await request('/api/logout',{method:'POST',headers:{cookie}})).status,405);
     app.drain();assert.equal((await request('/healthz')).status,503);
   } finally {
     if(app)await new Promise(resolve=>{app.server.close(resolve);app.server.closeAllConnections();});

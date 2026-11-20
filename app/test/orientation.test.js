@@ -40,104 +40,68 @@ test('Giro real de 180 grados: miniatura y pixeles de inferencia tienen la misma
   await assert.rejects(prepareImage(jpeg, 90), /Orientacion invalida/);
 });
 
-test('Orientacion persistente: reinicia promedio, conserva historial y rechaza inferencias atrasadas incluso al volver al mismo giro', async () => {
+test('Rotacion fija de 180 grados: conserva historial, rechaza cambios y no se reinicia al desplegar de nuevo', async () => {
   const db = new PGlite(), execute = executeFor(db), store = createStore(execute);
   try {
     await db.exec(await schema());
-    assert.deepEqual(await store.readCameraSettings(), { rotation: 0, version: '0' });
-    for (let i = 1; i <= 5; i++) await store.saveReading(frame(i), config);
-    const original = (await store.readHistory()).entries;
-    assert.equal((await store.readState()).conclusion, 'Hay basura');
-    assert.deepEqual(await store.setOrientation(180, '0'), { rotation: 180, version: '1' });
-    assert.deepEqual(await createStore(execute).readCameraSettings(), { rotation: 180, version: '1' });
-    assert.deepEqual((await store.readHistory()).entries, original);
-    await assert.rejects(store.saveReading(frame(6), config), error => error.status === 409);
-    await assert.rejects(store.setOrientation(0, '0'), error => error.status === 409);
-    let state = await store.saveReading({ ...frame(6), rotation: 180, orientationVersion: '1' }, config);
-    assert.equal(state.history.length, 1); assert.equal(state.streak, 0); assert.equal(state.conclusion, 'No seguro');
-    for (let i = 7; i <= 10; i++) state = await store.saveReading({ ...frame(i), rotation: 180, orientationVersion: '1' }, config);
-    assert.equal(state.conclusion, 'Hay basura');
-    assert.deepEqual(await store.setOrientation(180, '1'), { rotation: 180, version: '1' });
-    await store.setOrientation(0, '1'); await store.setOrientation(180, '2');
-    await assert.rejects(store.saveReading({ ...frame(11), rotation: 180, orientationVersion: '1' }, config), error => error.status === 409);
-    let changed = false;
-    const racing = createStore(async (sql, params) => {
-      if (!changed && sql.includes('WITH configuracion_actual')) { changed = true; await store.setOrientation(0, '3'); }
-      return execute(sql, params);
-    });
-    await assert.rejects(racing.saveReading({ ...frame(11), rotation: 180, orientationVersion: '3' }, config), error => error.status === 409);
-    assert.equal((await execute('SELECT count(*)::integer AS n FROM mediciones'))[0].n, 10);
-    assert.deepEqual(await store.readState(), state);
-    const pool = { connect: async () => ({ query: sql => db.exec(sql), release() {} }) };
-    await migrate(pool);
-    assert.deepEqual(await store.readCameraSettings(), { rotation: 0, version: '4' });
-  } finally { await db.close(); }
+    assert.deepEqual(await store.readCameraSettings(), { rotation:180,version:'0' });
+    for (let i=1;i<=5;i++) await store.saveReading(frame(i),config);
+    const original=(await store.readHistory()).entries;
+    assert.equal((await store.readState()).rotation,180);
+    await assert.rejects(db.query('UPDATE camaras SET rotacion=0'), error=>error.code==='23514');
+    await assert.rejects(store.setOrientation(0,'0'),error=>error.code==='23514');
+    await assert.rejects(store.saveReading({...frame(6),rotation:0},config),error=>error.status===409);
+    const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
+    await migrate(pool);await migrate(pool);
+    assert.deepEqual(await store.readCameraSettings(),{rotation:180,version:'0'});
+    assert.deepEqual((await store.readHistory()).entries,original);
+    const previous=await store.readState();
+    await execute('UPDATE estado_camara SET estado=$1::jsonb',[JSON.stringify({...previous,rotation:0})]);
+    const next=await store.saveReading(frame(6),config);
+    assert.equal(next.history.length,1);assert.equal(next.streak,0);assert.equal(next.rotation,180);
+    assert.equal((await store.readHistory()).entries.length,6);
+  } finally {await db.close();}
 });
 
-test('Actualizar esquema anterior conserva datos y usa orientacion normal por defecto', async () => {
-  const db = new PGlite();
+test('Migrar una camara normal a 180 grados conserva su nombre y aumenta la version una sola vez',async()=>{
+  const db=new PGlite();
   try {
-    // La tabla anterior no tenia las columnas de orientacion.
-    await db.exec("CREATE TABLE camaras (id text PRIMARY KEY,nombre text NOT NULL,ubicacion text,creada_en timestamptz NOT NULL DEFAULT now()); INSERT INTO camaras(id,nombre) VALUES ('camara-1','Nombre existente');");
-    const pool = { connect: async () => ({ query: sql => db.exec(sql), release() {} }) };
-    await migrate(pool); await migrate(pool);
-    assert.equal((await db.query('SELECT nombre FROM camaras')).rows[0].nombre, 'Nombre existente');
-    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(), { rotation: 0, version: '0' });
-  } finally { await db.close(); }
+    await db.exec("CREATE TABLE camaras(id text PRIMARY KEY,nombre text NOT NULL,ubicacion text,creada_en timestamptz NOT NULL DEFAULT now(),rotacion smallint NOT NULL DEFAULT 0,orientacion_version bigint NOT NULL DEFAULT 7); INSERT INTO camaras(id,nombre) VALUES('camara-1','Nombre existente');");
+    const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
+    await migrate(pool);await migrate(pool);
+    assert.equal((await db.query('SELECT nombre FROM camaras')).rows[0].nombre,'Nombre existente');
+    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(),{rotation:180,version:'8'});
+    await assert.rejects(db.query("INSERT INTO camaras(id,nombre,rotacion) VALUES('otra','Otra',0)"),error=>error.code==='23514');
+  }finally{await db.close();}
 });
 
-test('HTTP: giro autorizado, conflicto entre dispositivos, nueva captura y cambio durante el analisis', async () => {
-  process.env.SESSION_SECRET = 'rotation-session-test-'.repeat(3);
-  process.env.CAMERA_TOKEN = 'rotation-camera-test-'.repeat(3);
-  const db = new PGlite(), store = createStore(executeFor(db)); let app, release;
+test('HTTP: el ajuste de giro esta retirado incluso con sesiones anteriores; cada inferencia usa 180 grados',async()=>{
+  process.env.SESSION_SECRET='rotation-session-test-'.repeat(3);
+  process.env.CAMERA_TOKEN='rotation-camera-test-'.repeat(3);
+  const db=new PGlite(),store=createStore(executeFor(db));let app;
   try {
     await db.exec(await schema());
-    await store.saveReading({ ...frame(1), receivedAt: Date.now() - 1000 }, config);
-    let gate, entered, wait = false; const seen = [];
-    const analyze = async (_jpeg, options) => {
-      seen.push(options.rotation);
-      if (wait) { entered(); await gate; }
-      return { scores: [.05,.45,.4,.1], preview: 'preview', analysisMs: 12 };
-    };
-    app = createServer({ health: async () => {}, routes: {
-      '/api/state': createStateHandler(store.readCameraView),
-      '/api/camera-settings': createCameraSettingsHandler(store.setOrientation),
-      '/api/ingest': createIngestHandler(analyze, store.saveReading, store.readCameraSettings)
-    } });
-    await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
-    const base = 'http://127.0.0.1:' + app.server.address().port;
-    const cookie = 'xiao_session=' + createSession();
-    const headers = { cookie, 'content-type': 'application/json' };
-    const rotate = (rotation, expectedVersion, extra = {}) => fetch(base + '/api/camera-settings', {
-      method: 'POST', headers: { ...headers, ...extra }, body: JSON.stringify({ rotation, expectedVersion })
-    });
-    const state = async () => (await fetch(base + '/api/state', { headers: { cookie } })).json();
-    assert.equal((await rotate(180,'0',{ cookie:'' })).status, 401);
-    assert.equal((await fetch(base + '/api/camera-settings', { headers })).status, 405);
-    assert.equal((await rotate(180,'0',{ origin:'https://otro-sitio.test' })).status, 403);
-    for (const [rotation, version] of [[90,'0'],['180','0'],[180,0],[180,'-1'],[180,'9223372036854775807']])
-      assert.equal((await rotate(rotation, version)).status, 400);
-    const first = await rotate(180, '0'); assert.equal(first.status, 200);
-    assert.deepEqual((await first.json()).camera, { rotation: 180, version: '1' });
-    let view = await state(); assert.equal(view.orientationPending, true); assert.equal(view.state.conclusion, 'No seguro');
-    assert.equal((await rotate(0,'0')).status, 409);
-    const send = seq => fetch(base + '/api/ingest', { method: 'POST', headers: {
-      authorization: 'Bearer ' + process.env.CAMERA_TOKEN, 'content-type':'image/jpeg',
-      'x-camera-boot': '0123456789abcdef', 'x-frame-seq':String(seq)
-    }, body: Buffer.from([255,216,255,217]) });
-    assert.equal((await send(2)).status, 200);
-    view = await state(); assert.equal(view.orientationPending, false); assert.equal(view.state.rotation, 180); assert.equal(view.state.readings, 1);
-    wait = true; const waiting = new Promise(resolve => { entered = resolve; }); gate = new Promise(resolve => { release = resolve; });
-    const running = send(3); await waiting;
-    assert.equal((await rotate(0,'1')).status, 200);
-    release(); assert.equal((await running).status, 409);
-    assert.equal((await store.readHistory()).entries.length, 2);
-    wait = false; assert.equal((await send(4)).status, 200);
-    view = await state(); assert.equal(view.orientationPending, false); assert.equal(view.state.rotation, 0); assert.equal(view.state.readings, 1);
-    assert.deepEqual(seen, [180,180,0]);
-  } finally {
-    release?.();
-    if (app) await new Promise(resolve => { app.server.close(resolve); app.server.closeAllConnections(); });
-    await db.close();
-  }
+    const seen=[];let broken=false;
+    app=createServer({health:async()=>{},routes:{
+      '/api/state':createStateHandler(store.readCameraView),
+      '/api/camera-settings':createCameraSettingsHandler(()=>assert.fail('No debe modificar la camara')),
+      '/api/ingest':createIngestHandler(async(_jpeg,options)=>{seen.push(options.rotation);return{scores:[.05,.45,.4,.1],preview:'preview',analysisMs:12};},store.saveReading,async()=>broken?{rotation:0,version:'0'}:store.readCameraSettings())
+    }});
+    await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+    const base='http://127.0.0.1:'+app.server.address().port;
+    const cookie='xiao_session='+createSession();
+    for(const headers of [{},{cookie}])for(const method of ['GET','POST']){
+      const response=await fetch(base+'/api/camera-settings',{method,headers:{...headers,'content-type':'application/json'},...(method==='POST'?{body:JSON.stringify({rotation:0,expectedVersion:'0'})}:{})});
+      assert.equal(response.status,410);
+    }
+    const view=await(await fetch(base+'/api/state',{headers:{cookie}})).json();
+    assert.equal(view.canManageCamera,false);assert.equal(view.camera.rotation,180);
+    const send=seq=>fetch(base+'/api/ingest',{method:'POST',headers:{authorization:'Bearer '+process.env.CAMERA_TOKEN,'content-type':'image/jpeg','x-camera-boot':'0123456789abcdef','x-frame-seq':String(seq)},body:Buffer.from([255,216,255,217])});
+    assert.equal((await send(1)).status,200);assert.equal((await send(2)).status,200);
+    assert.deepEqual(seen,[180,180]);
+    const state=await(await fetch(base+'/api/state')).json();assert.equal(state.state.rotation,180);
+    assert.equal((await fetch(base+'/api/ingest',{method:'POST'})).status,401);
+    broken=true;assert.equal((await send(3)).status,503);assert.deepEqual(seen,[180,180]);
+    assert.equal((await store.readHistory()).entries.length,2);
+  }finally{if(app)await new Promise(resolve=>{app.server.close(resolve);app.server.closeAllConnections();});await db.close();}
 });

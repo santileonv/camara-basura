@@ -1,4 +1,3 @@
-import { viewerAuthorized } from '../lib/auth.js';
 import { LABELS, reply, settings } from '../lib/config.js';
 import { publicState } from '../lib/decision.js';
 import { readCameraView } from '../lib/store.js';
@@ -11,7 +10,7 @@ return async function handler(req, res) {
     const orientationPending = !!state && ((state.orientationVersion ?? '0') !== camera.version || (state.rotation ?? 0) !== camera.rotation);
     const visible = publicState(state, config.staleMs);
     if (orientationPending) visible.state.conclusion = 'No seguro';
-    reply(res, 200, { labels: LABELS, staleMs: config.staleMs, camera, canManageCamera: viewerAuthorized(req), orientationPending, ...visible });
+    reply(res, 200, { labels: LABELS, staleMs: config.staleMs, camera, canManageCamera: false, orientationPending, ...visible });
   } catch (error) {
     console.error('state:', error.message);
     reply(res, 503, { error: 'No se pudieron obtener las mediciones. Intenta nuevamente.' });
