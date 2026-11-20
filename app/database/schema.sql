@@ -60,4 +60,6 @@ CREATE TABLE IF NOT EXISTS mediciones (
 );
 
 CREATE INDEX IF NOT EXISTS mediciones_camara_id_desc ON mediciones (camara_id, id DESC);
+-- Navegacion por fechas y busqueda de la medicion anterior al borde del grafico.
+CREATE INDEX IF NOT EXISTS mediciones_camara_fecha_desc ON mediciones (camara_id, recibido_en DESC, id DESC);
 COMMIT;

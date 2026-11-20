@@ -54,6 +54,11 @@ test('PostgreSQL real en WASM: esquema, concurrencia, historial, transaccion y A
     assert.equal(incremental.entries.length, 0); assert.equal(incremental.cursor, graph.cursor);
     const throughFive = await store.readChartHistory({ minutes:15,now:frame(5).receivedAt });
     assert.equal(throughFive.entries.length, 5); // No anticipar lecturas con fecha posterior.
+    const past = await store.readChartHistory({ from:frame(1).receivedAt+1, to:frame(2).receivedAt+1, now:1700001020000 });
+    assert.equal(past.entries.length, 1); assert.equal(past.entries[0].receivedAt, frame(2).receivedAt);
+    assert.equal(past.context.receivedAt, frame(1).receivedAt); assert.equal(past.earliestAt, frame(1).receivedAt);
+    const daysAgo = await store.readChartHistory({ from:frame(1).receivedAt, to:frame(5).receivedAt, now:frame(5).receivedAt+5*86400000 });
+    assert.equal(daysAgo.entries.length, 5); // Navegar a mas de 24 h, sin anticipar mediciones posteriores.
     const lastWindow = await store.readChartHistory({ minutes:15,now:1700001020000 });
     assert.equal(lastWindow.entries.length, 1); // La ventana temporal excluye capturas antiguas.
     await assert.rejects(store.readHistory({ before: '9223372036854775808' }), error => error.status === 400);

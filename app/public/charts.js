@@ -1,4 +1,4 @@
-import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath } from './chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath, historyDomain, windowAtOffset } from './chart-data.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const pct = value => (100 * value).toFixed(1) + ' %';
@@ -13,12 +13,35 @@ function node(tag, attributes = {}, text) {
 
 export function createCharts({ onUnauthorized = () => {} } = {}) {
   const $ = id => document.getElementById(id);
-  let active = false, entries = [], cursor = null, minutes = 15, staleMs = 90000;
+  let active = false, entries = [], cursor = null, duration = 15 * 60000, staleMs = 90000;
   let request = null, timer, resizeTimer, skew = 0, lastUpdated = null, limited = false, error = '';
-  let selectedId = null, probability = null, spans = [];
-  const rangeButtons = [...document.querySelectorAll('[data-chart-minutes]')];
+  let selectedId = null, probability = null, spans = [], context = null;
+  let live = true, viewEnd = null, earliest = null, navigationTimer, loaded = false;
+  const scrollers = [...document.querySelectorAll('.historyScroller')];
+  const positions = new WeakMap();
+  const currentTime = () => Date.now() + skew;
+  const domain = () => historyDomain(earliest, currentTime(), duration);
 
-  function bounds() { const to = Date.now() + skew; return { from:to - minutes * 60000, to }; }
+  function bounds() { const to = live ? currentTime() : viewEnd; return { from:Math.max(0, to - duration), to }; }
+  function syncNavigation() {
+    const extent = domain(), view = bounds();
+    const span = extent.to - extent.from, travel = Math.max(0, span - duration);
+    const fraction = travel ? Math.max(0, Math.min(1, (view.from - extent.from) / travel)) : 1;
+    for (const bar of scrollers) {
+      const width = bar.clientWidth || 800;
+      bar.firstElementChild.style.width = Math.min(8000000, Math.max(width + 1, width * span / duration)) + 'px';
+      const offset = fraction * (bar.scrollWidth - bar.clientWidth);
+      positions.set(bar, offset);
+      if (Math.abs(bar.scrollLeft - offset) > .75) bar.scrollLeft = offset;
+      bar.setAttribute('aria-label', `Desplazar historial de ${date(extent.from)} a ${date(extent.to)}. Izquierda: más antiguo. Derecha: más reciente.`);
+    }
+    for (const label of document.querySelectorAll('.historyStart')) label.textContent = earliest === null ? 'Sin mediciones guardadas' : 'Inicio: ' + date(earliest);
+    $('chartMode').textContent = live ? '● En vivo · sigue las capturas nuevas' : 'Historial · vista fija';
+    $('liveCharts').setAttribute('aria-pressed', String(live));
+    $('chartRange').textContent = `${date(view.from)} — ${date(view.to)}`;
+    $('zoomInCharts').disabled = duration <= 60000;
+    $('zoomOutCharts').disabled = duration >= Math.max(60000, currentTime() - (earliest ?? currentTime() - duration));
+  }
   function frame(id, from, to, binary = false) {
     const svg = $(id), width = Math.max(300, svg.getBoundingClientRect().width || 800);
     const height = 280, left = binary ? (width < 450 ? 104 : 124) : 48, right = width - 16, top = 34, bottom = 224;
@@ -27,10 +50,11 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.append(node('title', {}, svg.getAttribute('aria-label')));
     svg.append(node('text', { x:binary ? 8 : left, y:16, class:'chartAxisTitle' }, binary ? 'Conclusión' : 'Probabilidad de basura (%)'));
-    const ticks = width < 450 ? (minutes === 1440 ? 2 : 3) : 5;
+    const withDate = new Date(from).toDateString() !== new Date(to).toDateString();
+    const ticks = width < 450 ? (withDate ? 2 : 3) : 5;
     for (let i = 0; i < ticks; i++) {
       const stamp = from + (to - from) * i / (ticks - 1);
-      const label = (minutes === 1440 ? new Date(stamp).toLocaleDateString('es-CL', { day:'2-digit',month:'2-digit' }) + ' ' : '') + time(stamp);
+      const label = (withDate ? new Date(stamp).toLocaleDateString('es-CL', { day:'2-digit',month:'2-digit' }) + ' ' : '') + time(stamp);
       svg.append(node('text', { x:x(stamp), y:bottom + 22, 'text-anchor':i === 0 ? 'start' : i === ticks - 1 ? 'end' : 'middle', class:'chartAxis' }, label));
     }
     svg.append(node('text', { x:(left + right) / 2, y:height - 7, 'text-anchor':'middle', class:'chartAxisTitle' }, 'Hora de la medición'));
@@ -131,7 +155,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   function render() {
     if (!active) return;
     const { from, to } = bounds(); entries = mergeChartEntries(entries, [], from, to);
-    spans = conclusionSpans(entries, from, to, staleMs); drawDecision(from, to);
+    spans = conclusionSpans(context ? [context, ...entries] : entries, from, to, staleMs); drawDecision(from, to);
     const segments = lineSegments(entries, staleMs);
     probability = frame('detectionChart', from, to);
     shadeThresholds(probability, segments); grid(probability);
@@ -140,60 +164,96 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
     addSeries(probability, segments, row => row.trashAverage, '#b55b36', 3);
     mark(probability); interactProbability(probability); selection();
-    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · Actualizado ${time(lastUpdated)} · Actualización automática cada 15 s.` + (limited ? ' Vista limitada a las 6000 más recientes.' : '') : 'Consultando mediciones…');
+    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? 'Actualización en vivo cada 15 s' : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Consultando mediciones…');
     $('chartStatus').classList.toggle('chartFailure', !!error);
     $('chartEmpty').hidden = entries.length > 0 || !lastUpdated || !!error;
+    syncNavigation();
   }
 
   async function refresh(reset = false) {
     clearTimeout(timer);
     if (!active || document.hidden || (request && !reset)) return;
-    if (reset) { request?.abort(); entries = []; cursor = null; lastUpdated = null; selectedId = null; limited = false; error = ''; render(); }
+    if (reset) { request?.abort(); entries = []; context = null; cursor = null; lastUpdated = null; selectedId = null; limited = false; error = ''; loaded = false; render(); }
     const controller = new AbortController(); request = controller;
     const timeout = setTimeout(() => controller.abort(), 20000);
     try {
-      const params = new URLSearchParams({ minutes:String(minutes) }); if (cursor !== null) params.set('after', cursor);
+      const view = bounds();
+      // La primera consulta obtiene la hora del servidor, aunque el reloj del PC este adelantado.
+      const params = new URLSearchParams(earliest === null && live && !loaded ?
+        { minutes:String(duration / 60000) } : { from:String(Math.floor(view.from)), to:String(Math.floor(view.to)) });
+      if (live && loaded && cursor !== null) params.set('after', cursor);
       const response = await fetch('/api/chart-history?' + params, { cache:'no-store', signal:controller.signal });
       if (request !== controller || !active) return;
       if (response.status === 401) { onUnauthorized(); return; }
       const data = await response.json();
       if (request !== controller || !active) return;
       if (!response.ok) throw new Error(data.error || 'No se pudieron consultar los gráficos.');
-      skew = data.to - Date.now(); staleMs = data.staleMs; cursor = data.cursor;
+      skew = data.now - Date.now(); staleMs = data.staleMs; cursor = data.cursor;
+      if ('earliestAt' in data) earliest = data.earliestAt;
+      context = data.context;
       limited = limited || data.truncated || entries.length + data.entries.length > 6000;
       entries = mergeChartEntries(entries, data.entries, data.from, data.to);
-      lastUpdated = data.to; error = ''; render();
+      if (earliest === null && entries.length) earliest = entries[0].receivedAt;
+      loaded = true; lastUpdated = data.now; error = ''; render();
     } catch (cause) {
       if (request !== controller || !active) return;
-      error = 'No se pudieron actualizar los gráficos. ' + (entries.length ? 'Se conservan los datos anteriores; reintentando.' : 'Pulsa Actualizar gráficos o espera el reintento.'); render();
+      error = 'No se pudieron actualizar los gráficos. ' + (entries.length ? 'Se conservan los datos anteriores.' : 'Pulsa Actualizar gráficos para reintentar.'); render();
     } finally {
       clearTimeout(timeout);
-      if (request === controller) { request = null; if (active && !document.hidden) timer = setTimeout(refresh, 15000); }
+      if (request === controller) { request = null; if (active && live && !document.hidden) timer = setTimeout(refresh, 15000); }
     }
   }
 
-  for (const button of rangeButtons) button.onclick = () => {
-    minutes = Number(button.dataset.chartMinutes);
-    for (const item of rangeButtons) item.setAttribute('aria-pressed', String(item === button));
-    refresh(true);
+  function navigate(to, nextDuration = duration, immediate = false) {
+    clearTimeout(timer); clearTimeout(navigationTimer);
+    const old = request; request = null; old?.abort();
+    duration = nextDuration; live = false; viewEnd = to;
+    entries = []; context = null; selectedId = null; cursor = null; lastUpdated = null; loaded = false; limited = false; error = '';
+    render();
+    if (immediate) refresh(true); else navigationTimer = setTimeout(() => refresh(true), 180);
+  }
+  for (const bar of scrollers) {
+    bar.onscroll = () => {
+      if (!active || Math.abs(bar.scrollLeft - (positions.get(bar) ?? -100)) < .75) return;
+      const distance = bar.scrollWidth - bar.clientWidth;
+      if (distance <= 0) return;
+      const view = windowAtOffset(domain(), duration, bar.scrollLeft / distance);
+      // Llegar al extremo derecho no reactiva el vivo accidentalmente.
+      navigate(view.to);
+    };
+  }
+  function zoom(factor) {
+    const view = bounds(), extent = domain();
+    const nextDuration = Math.max(60000, Math.min(Math.round(duration * factor), extent.to - extent.from));
+    const center = (view.from + view.to) / 2;
+    const to = live ? extent.to : Math.min(extent.to, Math.max(extent.from + nextDuration, center + nextDuration / 2));
+    const wasLive = live;
+    navigate(Math.round(to), nextDuration);
+    if (wasLive) { live = true; viewEnd = null; render(); }
+  }
+  $('zoomInCharts').onclick = () => zoom(.5);
+  $('zoomOutCharts').onclick = () => zoom(2);
+  $('liveCharts').onclick = () => {
+    clearTimeout(navigationTimer); live = true; viewEnd = null; refresh(true);
   };
   $('showCaptures').onchange = () => render();
-  $('refreshCharts').onclick = () => refresh(true);
+  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); refresh(true); };
   document.addEventListener('visibilitychange', () => {
-    clearTimeout(timer);
+    clearTimeout(timer); clearTimeout(navigationTimer);
     if (document.hidden) { const old = request; request = null; old?.abort(); }
-    else if (active) refresh();
+    else if (active && (live || !loaded)) refresh(!loaded);
   });
   const resize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 100); };
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe($('chartSections'));
   else window.addEventListener('resize', resize);
   return {
-    start() { if (!active) { active = true; refresh(true); } },
+    start() { if (!active) { active = true; live = true; viewEnd = null; refresh(true); } },
     stop() {
-      active = false; clearTimeout(timer); const old = request; request = null; old?.abort();
-      entries = []; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null;
+      active = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
+      const old = request; request = null; old?.abort();
+      entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false;
       for (const id of ['detectionChart', 'decisionChart']) $(id).replaceChildren();
-      for (const id of ['detectionTooltip', 'stepTooltip', 'stepState', 'stepTime', 'chartStatus', 'probabilityAverage', 'probabilityCapture', 'thresholdGuide']) $(id).textContent = '';
+      for (const id of ['detectionTooltip', 'stepTooltip', 'stepState', 'stepTime', 'chartStatus', 'probabilityAverage', 'probabilityCapture', 'thresholdGuide', 'chartRange', 'chartMode']) $(id).textContent = '';
     }
   };
 }
