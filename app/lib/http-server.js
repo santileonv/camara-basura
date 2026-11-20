@@ -5,7 +5,7 @@ import { reply } from './config.js';
 const PUBLIC = new URL('../public/', import.meta.url);
 const FILES = {
   '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'application/javascript'],
-  '/history-format.js': ['history-format.js', 'application/javascript'],
+  '/admin': ['admin.html', 'text/html'], '/admin.js': ['admin.js', 'application/javascript'],
   '/charts.js': ['charts.js', 'application/javascript'], '/chart-data.js': ['chart-data.js', 'application/javascript'],
   '/charts.css': ['charts.css', 'text/css'],
   '/style.css': ['style.css', 'text/css'], '/history.css': ['history.css', 'text/css']

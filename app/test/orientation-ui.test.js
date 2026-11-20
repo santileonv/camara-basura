@@ -23,13 +23,13 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
   const elements = new Map(); const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
   const document = { getElementById: get, createElement: () => new Element(), body: new Element(), hidden: false, addEventListener() {} };
   const timers = new Map(); let timerId = 0, heldPoll, delayPoll = false, failChange = false;
-  let current = { rotation: 0, version: '0' };
+  let current = { rotation: 0, version: '0' }, admin = true;
   let reading = { receivedAt: Date.now(), rotation: 0, orientationVersion: '0', scores:[.05,.45,.4,.1],
     preview:'normal', conclusion:'Hay basura', trashNow:.95, trashAverage:.95, readings:5, streak:3, threshold:.8, analysisMs:100 };
   const changes = [];
   const fetch = async (url, options = {}) => {
     if (url === '/api/state') {
-      const snapshot = { state: { ...reading }, camera: { ...current }, staleMs:90000 };
+      const snapshot = { state: { ...reading }, camera: { ...current }, canManageCamera:admin, staleMs:90000 };
       if (delayPoll) { delayPoll = false; return new Promise(resolve => { heldPoll = () => resolve(response(snapshot)); }); }
       return response(snapshot);
     }
@@ -41,7 +41,7 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
       current = { rotation:data.rotation, version:String(BigInt(current.version) + 1n) };
       return response({ camera: { ...current } });
     }
-    if (url === '/api/logout') return response({ ok:true });
+    if (url === '/api/logout') { admin = false; return response({ ok:true }); }
     throw new Error('Ruta inesperada: ' + url);
   };
   const context = vm.createContext({ document, fetch, AbortController, AbortSignal, URL, URLSearchParams, Blob,
@@ -105,5 +105,8 @@ test('Boton del monitor gira inmediatamente, espera la nueva inferencia y no ret
   assert.equal(get('rotateCamera').getAttribute('aria-pressed'), 'false');
   assert.equal(get('conclusion').textContent, 'Esperando nueva captura');
   await get('logout').onclick();
-  assert.equal(get('rotateCamera').disabled, true); assert.equal(get('dashboard').hidden, true);
+  assert.equal(get('rotateCamera').disabled, true); assert.equal(get('rotateCamera').hidden, true);
+  assert.equal(get('logout').hidden, true); assert.equal(get('dashboard').hidden, false);
+  const count = changes.length; await get('rotateCamera').onclick(); assert.equal(changes.length, count);
+  await vm.runInContext('poll()', context); assert.equal(get('dashboard').hidden, false);
 });

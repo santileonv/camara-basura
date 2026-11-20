@@ -65,7 +65,7 @@ test('PostgreSQL real en WASM: esquema, concurrencia, historial, transaccion y A
       await handler({ method: 'GET', url, headers: { cookie } }, res);
       return { status: res.statusCode, body };
     };
-    assert.equal((await request('/api/history')).status, 401);
+    assert.equal((await request('/api/history')).status, 200);
     const cookie = 'xiao_session=' + createSession();
     const result = await request('/api/history?limit=2', cookie);
     assert.equal(result.status, 200);assert.equal(result.body.entries.length, 2);

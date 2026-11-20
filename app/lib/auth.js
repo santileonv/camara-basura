@@ -21,17 +21,22 @@ export function createSession() {
   return value + '.' + sign(value);
 }
 export function viewerAuthorized(req) {
+  try {
   const match = (req.headers.cookie || '').match(/(?:^|;\s*)xiao_session=([^;]+)/);
   if (!match) return false;
   const [expires, signature] = match[1].split('.');
   return /^\d+$/.test(expires) && Number(expires) > Date.now() && equal(signature || '', sign(expires));
+  } catch { return false; } // Sin administracion configurada, el monitor sigue siendo publico.
 }
 export function setSession(res, value, age = 43200) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
   res.setHeader('Set-Cookie', `xiao_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${secure}`);
 }
 export function validateAuthConfig() {
-  required('CAMERA_TOKEN', 32); required('DASHBOARD_PASSWORD', 12); required('SESSION_SECRET', 32);
+  required('CAMERA_TOKEN', 32);
+  if (process.env.DASHBOARD_PASSWORD || process.env.SESSION_SECRET) {
+    required('DASHBOARD_PASSWORD', 12); required('SESSION_SECRET', 32);
+  }
 }
 export function sameOrigin(req) {
   if (!req.headers.origin) return true;
