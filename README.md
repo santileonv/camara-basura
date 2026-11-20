@@ -19,7 +19,7 @@ La cámara mantiene una rotación fija de 180°, aplicada tanto al análisis com
 
 ## Consulta pública y administración
 
-La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los tres gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; retirar las descargas no vuelve privados los datos visibles.
+La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los dos gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; retirar las descargas no vuelve privados los datos visibles.
 
 No hay botones de descarga JSON ni CSV. `GET /api/export.json` ya no está registrado en el servidor y el antiguo handler responde 404 incluso con una sesión anterior. Los respaldos y exportaciones del propietario se realizan directamente en Aiven o con una herramienta PostgreSQL, fuera del monitor público.
 
@@ -39,17 +39,18 @@ Añadir un archivo a `.gitignore` no elimina una copia que ya estuviera registra
 
 ## Gráficos en tiempo real
 
-Debajo de la cámara hay tres vistas del mismo historial:
+Debajo de la cámara hay dos vistas complementarias del historial:
 
-- **Detección de basura en el tiempo:** suma de Botellas + Papeles y Cartones + Bolsas por captura, promedio de hasta cinco capturas y umbrales usados en cada medición.
-- **Porcentajes por clase:** cuatro líneas que se pueden ocultar individualmente, con los valores originales del modelo.
-- **Conclusiones en el tiempo:** tramos de Hay basura, Sin basura y No seguro. El rayado representa períodos sin datos recientes; no se confunde con una conclusión negativa.
+- **¿Hay basura?:** gráfico de escalones con solo dos niveles, Hay basura y Sin basura. Los saltos directos se dibujan verticalmente en la hora de la nueva conclusión. Los períodos No seguro interrumpen la línea y se sombrean en amarillo; la falta de datos se representa con rayado. No se convierte la incertidumbre en un resultado negativo.
+- **Probabilidad de basura:** línea principal de la suma de Botellas + Papeles y Cartones + Bolsas promediada en hasta cinco capturas. Las zonas y líneas punteadas muestran los umbrales registrados en cada medición. Las capturas individuales están ocultas por defecto y pueden activarse con Mostrar cada captura. Debajo se distinguen el valor del promedio y el de la captura seleccionada.
+
+Se retira el gráfico de porcentajes por clase y la franja duplicada de conclusiones. Las barras de la última captura y la tabla del historial conservan sus datos.
 
 El selector permite consultar 15 minutos, 1 hora o 24 horas. El cursor, el toque y las flechas del teclado permiten inspeccionar valores y tramos. Se muestran horas locales del dispositivo. Los gráficos conservan las conclusiones registradas: no las recalculan con la configuración actual.
 
 `GET /api/chart-history` es una consulta pública y limita cada respuesta a 6000 mediciones, sin fotos. Tras la carga inicial, solicita cada 15 segundos solo IDs nuevos; deduplica las filas y descarta las que salen del intervalo. Los IDs permanecen como texto para preservar BIGINT. Cambiar de intervalo cancela la consulta anterior; ocultar la pestaña suspende las consultas. El monitor es solo de consulta y no utiliza sesiones de administración. No añade dependencias externas ni cambia el modelo, firmware o esquema de la base.
 
-Las líneas se interrumpen cuando la separación supera `STALE_AFTER_SECONDS`. La franja prolonga cada conclusión hasta la siguiente medición o hasta que venza ese plazo, lo que ocurra antes. Si se alcanza el límite de 6000 filas, la interfaz lo indica; el propietario puede consultar los registros completos directamente en Aiven.
+Las líneas se interrumpen cuando la separación supera `STALE_AFTER_SECONDS`. El escalón prolonga cada conclusión confirmada hasta la siguiente medición o hasta que venza ese plazo, lo que ocurra antes. La siguiente conclusión No seguro corta la línea inmediatamente. Si se alcanza el límite de 6000 filas, la interfaz lo indica; el propietario puede consultar los registros completos directamente en Aiven.
 
 ## 1. Crear o seleccionar la base en Aiven
 

@@ -1,6 +1,4 @@
 // Datos originales del historial. No se recalculan las conclusiones del servidor.
-export const CLASS_LABELS = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas'];
-export const CLASS_COLORS = ['#258263', '#4678be', '#b67b27', '#9263ac'];
 export const STATE_COLORS = { 'Hay basura': '#c66742', 'Sin basura': '#258263', 'No seguro': '#89968d' };
 
 export function mergeChartEntries(previous, incoming, from, to, limit = 6000) {
@@ -32,6 +30,25 @@ export function conclusionSpans(entries, from, to, staleMs) {
     else spans.push({ from: start, to: end, conclusion: row.conclusion });
   }
   return spans;
+}
+
+// Dos niveles reales, sin interpretar No seguro o una desconexion como cero.
+// Al cambiar directamente de estado, los dos puntos en el mismo instante
+// dibujan un salto vertical. Cualquier periodo desconocido interrumpe la linea.
+export function decisionStepSegments(spans) {
+  const runs = [];
+  for (const span of spans) {
+    if (!['Hay basura', 'Sin basura'].includes(span.conclusion)) continue;
+    const value = span.conclusion === 'Hay basura' ? 1 : 0;
+    let run = runs.at(-1);
+    if (!run || run.at(-1).at !== span.from) { run = []; runs.push(run); }
+    run.push({ at:span.from,value }, { at:span.to,value });
+  }
+  return runs;
+}
+
+export function decisionStepPath(runs, x, y) {
+  return runs.map(run => run.map((point, i) => `${i ? 'L' : 'M'}${x(point.at).toFixed(1)},${y(point.value).toFixed(1)}`).join('')).join('');
 }
 
 export function nearestEntry(entries, timestamp) {

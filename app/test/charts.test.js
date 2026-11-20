@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry } from '../public/chart-data.js';
+import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, decisionStepSegments, decisionStepPath } from '../public/chart-data.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
 import { createSession } from '../lib/auth.js';
 import { createStore } from '../lib/store.js';
@@ -55,4 +55,18 @@ test('El historial para graficos limita la respuesta sin redondear el cursor de 
   assert.equal(result.entries.length, 6000); assert.equal(result.truncated, true);
   assert.equal(result.cursor, '9007199254747999');
   await assert.rejects(store.readChartHistory({ minutes:2 }), error => error.status === 400);
+});
+
+test('Escalones: saltos verticales en la hora confirmada, sin convertir incertidumbre o desconexion en Sin basura', () => {
+  const spans = [{from:0,to:10,conclusion:'Sin basura'}, {from:10,to:20,conclusion:'Hay basura'},
+    {from:20,to:30,conclusion:'No seguro'}, {from:30,to:40,conclusion:'Hay basura'},
+    {from:50,to:60,conclusion:'Sin basura'}];
+  const runs = decisionStepSegments(spans);
+  assert.deepEqual(runs, [
+    [{at:0,value:0},{at:10,value:0},{at:10,value:1},{at:20,value:1}],
+    [{at:30,value:1},{at:40,value:1}], [{at:50,value:0},{at:60,value:0}]
+  ]);
+  assert.equal(decisionStepPath(runs, x=>x, y=>y), 'M0.0,0.0L10.0,0.0L10.0,1.0L20.0,1.0M30.0,1.0L40.0,1.0M50.0,0.0L60.0,0.0');
+  assert.deepEqual(decisionStepSegments([{from:0,to:100,conclusion:'No seguro'}]), []);
+  assert.deepEqual(decisionStepSegments([]), []);
 });
