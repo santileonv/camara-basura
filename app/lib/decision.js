@@ -8,7 +8,9 @@ export function decide(previous, reading, { threshold, staleMs }) {
   if (previous && (reading.receivedAt < previous.receivedAt ||
       (reading.boot === previous.boot && reading.seq <= previous.seq))) return previous;
   const reset = !previous || reading.boot !== previous.boot ||
-    reading.receivedAt - previous.receivedAt > staleMs || previous.threshold !== threshold;
+    reading.receivedAt - previous.receivedAt > staleMs || previous.threshold !== threshold ||
+    (reading.orientationVersion ?? '0') !== (previous.orientationVersion ?? '0') ||
+    (reading.rotation ?? 0) !== (previous.rotation ?? 0);
   const history = reset ? [] : [...previous.history];
   const trashNow = Math.min(1, scores.slice(1).reduce((a, b) => a + b, 0));
   history.push(trashNow); if (history.length > 5) history.shift();

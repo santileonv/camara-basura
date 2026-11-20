@@ -8,3 +8,8 @@
 .historyActions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
 .historyActions button{font-size:12px}
 .history button:disabled{cursor:default}
+
+.cameraControls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}
+.cameraControls p{margin:0;flex:1 1 220px}
+.photo img.upsideDown{transform:rotate(180deg)}
+#cameraError:empty{display:none}

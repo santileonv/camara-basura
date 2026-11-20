@@ -9,15 +9,21 @@ export async function importHistory(source, target) {
     await source.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY'); sourceOpen = true;
     await target.query('BEGIN'); targetOpen = true;
     // Mismo orden que las escrituras de la aplicacion para evitar interbloqueos.
+    await target.query('LOCK TABLE camaras IN SHARE ROW EXCLUSIVE MODE');
     await target.query('LOCK TABLE estado_camara IN ACCESS EXCLUSIVE MODE');
     await target.query('LOCK TABLE mediciones IN ACCESS EXCLUSIVE MODE');
     const occupied = await target.query('SELECT (SELECT count(*) FROM mediciones) + (SELECT count(*) FROM estado_camara) AS n');
     if (Number(occupied.rows[0].n) !== 0) throw new Error('El destino ya contiene datos. La importacion requiere una base nueva; no se ha borrado nada.');
-    const cameras = (await source.query('SELECT id, nombre, ubicacion, creada_en::text AS creada_en FROM camaras ORDER BY id')).rows;
+    // to_jsonb permite leer tambien origenes anteriores que no tenian orientacion.
+    const cameras = (await source.query(`SELECT id, nombre, ubicacion, creada_en::text AS creada_en,
+      COALESCE((to_jsonb(c)->>'rotacion')::smallint, 0) AS rotacion,
+      COALESCE(to_jsonb(c)->>'orientacion_version', '0') AS orientacion_version
+      FROM camaras c ORDER BY id`)).rows;
     for (const row of cameras) {
-      await target.query(`INSERT INTO camaras (id,nombre,ubicacion,creada_en) VALUES ($1,$2,$3,$4)
-        ON CONFLICT (id) DO UPDATE SET nombre=EXCLUDED.nombre, ubicacion=EXCLUDED.ubicacion, creada_en=EXCLUDED.creada_en`,
-        [row.id,row.nombre,row.ubicacion,row.creada_en]);
+      await target.query(`INSERT INTO camaras (id,nombre,ubicacion,creada_en,rotacion,orientacion_version) VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (id) DO UPDATE SET nombre=EXCLUDED.nombre, ubicacion=EXCLUDED.ubicacion,
+          creada_en=EXCLUDED.creada_en, rotacion=EXCLUDED.rotacion, orientacion_version=EXCLUDED.orientacion_version`,
+        [row.id,row.nombre,row.ubicacion,row.creada_en,row.rotacion,row.orientacion_version]);
     }
     let cursor = '0', measurements = 0;
     for (;;) {

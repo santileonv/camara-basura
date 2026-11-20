@@ -22,8 +22,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     await db.exec(await readFile(new URL('../database/schema.sql',import.meta.url),'utf8'));
     const store = createStore(async(sql,params)=>(await db.query(sql,params)).rows);
     let healthy = true;
-    const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading),
-      '/api/state':createStateHandler(store.readState),'/api/history':createHistoryHandler(store.readHistory),
+    const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading,store.readCameraSettings),
+      '/api/state':createStateHandler(store.readCameraView),'/api/history':createHistoryHandler(store.readHistory),
       '/api/login':login,'/api/logout':logout};
     app=createServer({routes,health:async()=>{if(!healthy)throw new Error('test-health');await db.query('SELECT 1');}});
     await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});

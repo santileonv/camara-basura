@@ -1,21 +1,29 @@
 # Detector de basura XIAO · Railway + PostgreSQL en Aiven
 
-Versión 3.1.0 · TALLER DISEÑO · 20 de noviembre de 2026.
+Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor se puede abrir desde cualquier red. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-Esta actualización añade **Descargar todo · JSON**, conexión TLS con certificado CA para Aiven y una herramienta para copiar el historial conservando IDs, fechas y el último estado. El firmware no necesita cambios por trasladar la base si conservas el dominio y el token del servidor.
+La versión 3.2 añade un botón para invertir la cámara 180°, con la orientación aplicada tanto al análisis como a la miniatura y guardada en PostgreSQL. Conserva la descarga completa en JSON y la conexión TLS con CA de Aiven. No requiere volver a cargar el firmware.
 
-**Estado comprobado al preparar esta versión:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. Tanto el servicio web como `Postgres` están detenidos. El volumen de PostgreSQL sigue asociado. La migración real a Aiven y la publicación de esta versión aún no se han ejecutado. Este documento describe cómo completar y comprobar esas acciones.
+**Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
 | Componente | Dónde funciona |
 |---|---|
 | Firmware y cámara | XIAO ESP32-S3 Sense |
 | Código del servidor | GitHub: `santileonv/camara-basura` |
 | Web y análisis del modelo | Railway: `Taller-Diseno-XIAO` → `xiao-monitor` |
-| Datos actuales antes de la copia | Railway: `Postgres` |
-| Destino propuesto para los datos | PostgreSQL de Aiven |
+| Base anterior conservada, apagada | Railway: `Postgres` |
+| Base de datos actual | PostgreSQL de Aiven |
 | Monitor | https://xiao-monitor-production.up.railway.app |
+
+## Orientar la cámara desde el monitor
+
+Debajo de la última foto, **Invertir cámara · 180°** alterna entre la posición normal y una rotación de 180 grados. La elección se guarda en PostgreSQL para esa cámara y se comparte entre dispositivos; no requiere cambiar el firmware. Cuando está invertida, el botón permite **Restaurar posición normal**.
+
+El servidor gira la imagen antes del recorte y de ejecutar el modelo. La miniatura utiliza el mismo giro. Al cambiarlo, la foto anterior se muestra girada mientras llega la nueva; los porcentajes y la conclusión esperan la captura corregida. El promedio y las confirmaciones empiezan de nuevo para evitar mezclar orientaciones. Las mediciones anteriores se conservan.
+
+La ruta `POST /api/camera-settings` exige sesión y el mismo origen. Una versión de configuración evita que una consulta atrasada o una inferencia en curso sobrescriban la orientación elegida. Las columnas `camaras.rotacion` y `camaras.orientacion_version` se incorporan automáticamente al arrancar, con orientación inicial normal para instalaciones anteriores. El JSON mantiene los 16 campos de las mediciones; no reinterpreta resultados históricos.
 
 ## 1. Crear o seleccionar la base en Aiven
 

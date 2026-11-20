@@ -5,9 +5,13 @@ const CAMERA_ID = 'camara-1';
 // La revision evita carreras. El estado y la medicion se escriben juntos:
 // si falla el registro, PostgreSQL revierte tambien el cambio de estado.
 const SAVE = `
-WITH actualizado AS (
+WITH configuracion_actual AS MATERIALIZED (
+  SELECT id FROM camaras
+  WHERE id = $1 AND orientacion_version = $4::bigint AND rotacion = $5::smallint
+  FOR UPDATE
+), actualizado AS (
   INSERT INTO estado_camara (camara_id, revision, estado)
-  VALUES ($1, 1, $2::jsonb)
+  SELECT $1, 1, $2::jsonb FROM configuracion_actual WHERE true
   ON CONFLICT (camara_id) DO UPDATE
   SET revision = estado_camara.revision + 1,
       estado = EXCLUDED.estado, actualizado_en = clock_timestamp()
@@ -34,17 +38,43 @@ SELECT estado FROM actualizado CROSS JOIN registrado`;
 
 // La misma implementacion funciona con pg en Railway y PostgreSQL local (PGlite).
 export function createStore(execute) {
+  const cameraColumns = 'rotacion AS rotation, orientacion_version::text AS version';
+  async function readCameraSettings() {
+    const rows = await execute('SELECT ' + cameraColumns + ' FROM camaras WHERE id = $1', [CAMERA_ID]);
+    if (!rows.length) throw new Error('Camara no configurada.');
+    return rows[0];
+  }
+  async function readCameraView() {
+    const rows = await execute(`SELECT c.rotacion AS rotation, c.orientacion_version::text AS version, e.estado
+      FROM camaras c LEFT JOIN estado_camara e ON e.camara_id = c.id WHERE c.id = $1`, [CAMERA_ID]);
+    if (!rows.length) throw new Error('Camara no configurada.');
+    const { estado, ...camera } = rows[0]; return { camera, state: estado };
+  }
+  async function setOrientation(rotation, expectedVersion) {
+    if (![0, 180].includes(rotation) || !/^(0|[1-9]\d{0,18})$/.test(expectedVersion) || BigInt(expectedVersion) >= 9223372036854775807n)
+      throw Object.assign(new Error('Orientacion o version invalida.'), { status: 400 });
+    const rows = await execute(`UPDATE camaras SET rotacion = $2,
+      orientacion_version = orientacion_version + CASE WHEN rotacion <> $2 THEN 1 ELSE 0 END
+      WHERE id = $1 AND orientacion_version = $3::bigint RETURNING ` + cameraColumns,
+    [CAMERA_ID, rotation, expectedVersion]);
+    if (!rows.length) throw Object.assign(new Error('La orientacion cambio en otro dispositivo. Actualiza e intentalo nuevamente.'), { status: 409 });
+    return rows[0];
+  }
   async function readVersionedState() {
     const rows = await execute('SELECT revision, estado FROM estado_camara WHERE camara_id = $1', [CAMERA_ID]);
     return rows[0] || { revision: '0', estado: null };
   }
   async function readState() { return (await readVersionedState()).estado; }
   async function saveReading(reading, config) {
+    reading = { ...reading, rotation: reading.rotation ?? 0, orientationVersion: reading.orientationVersion ?? '0' };
     for (let attempt = 0; attempt < 5; attempt++) {
+      const camera = await readCameraSettings();
+      if (camera.version !== reading.orientationVersion || camera.rotation !== reading.rotation)
+        throw Object.assign(new Error('La orientacion cambio durante el analisis. Espera una nueva captura.'), { status: 409 });
       const previous = await readVersionedState();
       const next = decide(previous.estado, reading, config);
       if (next === previous.estado) return previous.estado;
-      const rows = await execute(SAVE, [CAMERA_ID, JSON.stringify(next), previous.revision]);
+      const rows = await execute(SAVE, [CAMERA_ID, JSON.stringify(next), previous.revision, reading.orientationVersion, reading.rotation]);
       if (rows.length) return rows[0].estado;
     }
     throw new Error('Llegaron demasiadas capturas simultaneas.');
@@ -66,6 +96,6 @@ export function createStore(execute) {
     const entries = rows.slice(0, limit);
     return { entries, nextCursor: rows.length > limit ? entries.at(-1).id : null };
   }
-  return { readState, saveReading, readHistory };
+  return { readState, saveReading, readHistory, readCameraSettings, readCameraView, setOrientation };
 }
-export const { readState, saveReading, readHistory } = createStore(query);
+export const { readState, saveReading, readHistory, readCameraSettings, readCameraView, setOrientation } = createStore(query);
