@@ -1,3 +1,4 @@
+import { createDayOverview } from './chart-overview.js';
 import { mergeChartEntries, lineSegments, conclusionSpans, nearestEntry, seriesPath, decisionStepSegments, decisionStepPath, windowAtOffset, localDayKey, localDayBounds, clampDayWindow } from './chart-data.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -13,7 +14,7 @@ function node(tag, attributes = {}, text) {
 
 export function createCharts({ onUnauthorized = () => {} } = {}) {
   const $ = id => document.getElementById(id);
-  let active = false, entries = [], cursor = null, duration = 15 * 60000, staleMs = 90000;
+  let active = false, entries = [], cursor = null, duration = 5 * 60000, staleMs = 90000;
   let request = null, timer, resizeTimer, skew = 0, lastUpdated = null, limited = false, error = '';
   let selectedId = null, probability = null, spans = [], context = null;
   let live = true, viewEnd = null, earliest = null, navigationTimer, loaded = false;
@@ -31,6 +32,23 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     const day = domain();
     return fullDay ? day : clampDayWindow(day, duration, live ? currentTime() : viewEnd ?? day.to);
   }
+  function focusRecord(stamp) {
+    if(!Number.isFinite(stamp))return;
+    const day=domain(),span=fullDay?5*60000:Math.min(duration,60*60000);
+    fullDay=false;
+    navigate(clampDayWindow(day,span,stamp+span/2).to,span,true);
+  }
+  function fitRecords(first,last) {
+    const day=domain(),span=Math.min(day.to-day.from,Math.max(60000,last-first+120000));
+    fullDay=span===day.to-day.from;
+    navigate(clampDayWindow(day,span,(first+last+span)/2).to,span,true);
+  }
+  function showLatest(stamp) {
+    const day=localDayBounds(localDayKey(stamp));
+    selectedDay=localDayKey(stamp);live=false;fullDay=false;$('chartDateError').hidden=true;
+    navigate(clampDayWindow(day,5*60000,stamp+60000).to,5*60000,true);
+  }
+  const overview=createDayOverview({getDay:domain,getView:bounds,getNow:currentTime,onJump:focusRecord,onFit:fitRecords,onLastAvailable:showLatest});
   function syncNavigation() {
     const extent = domain(), view = bounds(), span = extent.to - extent.from;
     const visible = view.to - view.from, travel = Math.max(0, span - visible);
@@ -61,6 +79,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     $('chartRange').textContent = `Viendo ${time(view.from)} — ${endLabel} · ${durationLabel}`;
     $('zoomInCharts').disabled = visible <= 60000;
     $('zoomOutCharts').disabled = visible >= span;
+    overview.render();
   }
   function frame(id, from, to, binary = false) {
     const svg = $(id), width = Math.max(300, svg.getBoundingClientRect().width || 800);
@@ -197,7 +216,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
     addSeries(probability, segments, row => row.trashAverage, '#b55b36', 3);
     mark(probability); interactProbability(probability); selection();
-    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? (realtime ? 'Actualización al recibir mediciones' : 'Actualización automática cada 2 s') : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Consultando mediciones…');
+    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? (realtime ? 'Actualización al recibir mediciones' : 'Actualización automática cada 2 s') : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Cargando este tramo… Las marcas del mapa siguen disponibles.');
     $('chartStatus').classList.toggle('chartFailure', !!error);
     $('chartEmpty').textContent = from >= currentTime() ? 'Este tramo de hoy aún no ocurre. Desplaza la barra hacia una hora anterior o vuelve al vivo.' : 'No hay mediciones en este tramo. Prueba otra hora, otro intervalo o una fecha distinta.';
     $('chartEmpty').hidden = entries.length > 0 || !lastUpdated || !!error;
@@ -205,9 +224,11 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   }
 
   function applyData(data, fromCache = false) {
+    if(error && !fromCache)overview.reload(false);
     if (!fromCache) skew = data.now - Date.now();
     staleMs = data.staleMs; cursor = data.cursor;
     if ('earliestAt' in data) earliest = data.earliestAt;
+    if ('latestAt' in data) overview.setLatest(data.latestAt);
     const view = bounds();
     // El fin del dia es exclusivo: una captura de las 00:00 pertenece al dia siguiente.
     const incoming = mergeChartEntries(entries, data.entries, data.from, data.to).filter(row => row.receivedAt < domain().to);
@@ -215,7 +236,8 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     limited = limited || data.truncated || entries.length + data.entries.length > 6000;
     entries = mergeChartEntries(incoming, [], view.from, view.to);
     if (earliest === null && entries.length) earliest = entries[0].receivedAt;
-    loaded = true; lastUpdated = data.now; error = ''; render();
+    loaded = true; lastUpdated = data.now; error = '';
+    overview.render(); overview.accept(data.entries); render();
   }
   async function refresh(reset = false) {
     clearTimeout(timer);
@@ -266,6 +288,8 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     const old = request; request = null; old?.abort();
     duration = nextDuration; live = false; viewEnd = to; refreshQueued = false;
     entries = []; context = null; selectedId = null; cursor = null; lastUpdated = null; loaded = false; limited = false; error = '';
+    const view=bounds();
+    if(cache && view.from>=cache.from && Math.min(view.to,currentTime())<=cache.to) { applyData(cache,true); return; }
     render();
     if (immediate) refresh(true); else navigationTimer = setTimeout(() => refresh(true), 180);
   }
@@ -315,11 +339,11 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   $('zoomInCharts').onclick = () => zoom(.5);
   $('zoomOutCharts').onclick = () => zoom(2);
   $('liveCharts').onclick = () => {
-    clearTimeout(navigationTimer); live = true; viewEnd = null; fullDay = false; duration = 15 * 60000; cache = null;
+    clearTimeout(navigationTimer); live = true; viewEnd = null; fullDay = false; duration = 5 * 60000; cache = null;
     $('chartDateError').hidden = true; refresh(true);
   };
   $('showCaptures').onchange = () => render();
-  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); cache = null; refresh(true); };
+  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); cache = null; overview.reload(); refresh(true); };
   document.addEventListener('visibilitychange', () => {
     clearTimeout(timer); clearTimeout(navigationTimer);
     if (document.hidden) { const old = request; request = null; old?.abort(); }
@@ -335,16 +359,18 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       $('chartDecisionHelp').textContent = `Configuración actual: ${next.confirmationsRequired} evaluaciones consecutivas para confirmar. El porcentaje no representa cantidad ni volumen de residuos.`;
     },
     setRealtime(connected) {
+      const reconnect=connected && !realtime;
       realtime = connected; clearTimeout(timer);
+      if(reconnect)overview.reload(false);
       if (!connected && active && live && !document.hidden && !request) timer = setTimeout(refresh, 2000);
     },
     notify() {
       if (!active || !live || document.hidden) return;
       if (request) refreshQueued = true; else refresh();
     },
-    start() { if (!active) { active = true; live = true; viewEnd = null; refresh(true); } },
+    start() { if (!active) { active = true; live = true; viewEnd = null; overview.start(); refresh(true); } },
     stop() {
-      active = false; refreshQueued = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
+      active = false; overview.stop(); refreshQueued = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
       const old = request; request = null; old?.abort();
       entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false; cache = null;
       for (const id of ['detectionChart', 'decisionChart']) $(id).replaceChildren();

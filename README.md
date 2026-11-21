@@ -56,11 +56,15 @@ Debajo de la cámara hay dos vistas complementarias del historial:
 
 Se retira el gráfico de porcentajes por clase y la franja duplicada de conclusiones. Las barras de la última captura y la tabla del historial conservan sus datos.
 
-Los controles se agrupan en un panel con fecha, flechas de día anterior/siguiente, intervalos rápidos de **15 minutos**, **1 hora** y **24 horas · día completo**, botones de zoom y **Volver al vivo**. Elegir una fecha abre su día completo; luego los intervalos y el zoom permiten acercarse y la barra horizontal recorre solamente las horas de ese día. Las barras de ambos gráficos están sincronizadas. En día completo la barra queda sin recorrido porque todo el día ya está visible. El panel indica la fecha y las horas exactas consultadas.
+Los controles se agrupan en un panel con fecha, flechas de día anterior/siguiente, intervalos rápidos de **5 minutos · demo**, **15 minutos**, **1 hora** y **24 horas · día completo**, botones de zoom y **Volver al vivo**. Elegir una fecha abre su día completo; luego los intervalos y el zoom permiten acercarse y la barra horizontal recorre solamente las horas de ese día. Las barras de ambos gráficos están sincronizadas. En día completo la barra queda sin recorrido porque todo el día ya está visible. El panel indica la fecha y las horas exactas consultadas.
 
 El día se calcula con el calendario y la zona horaria del navegador: empieza en su medianoche y termina justo antes de la siguiente. Las capturas de las 00:00 siguientes no se incluyen en la fecha anterior. Se respetan los días de 23 o 25 horas por cambios de horario y se indica su duración. No se permiten fechas posteriores a hoy ni anteriores al primer día guardado.
 
-Al consultar hoy, los gráficos muestran las horas futuras en azul claro, sin solicitar datos futuros ni prolongar conclusiones hacia ellas. Volver al vivo selecciona hoy y los últimos 15 minutos; en vivo el calendario pasa automáticamente al nuevo día al llegar medianoche. El modo histórico mantiene fija la vista. Una consulta completa del día se reutiliza localmente para desplazar o acercar sin repetir la consulta; Actualizar gráficos renueva los datos guardados en memoria. No se conserva esa copia al cerrar el monitor.
+Al consultar hoy, los gráficos muestran las horas futuras en azul claro, sin solicitar datos futuros ni prolongar conclusiones hacia ellas. Volver al vivo selecciona hoy y los últimos 5 minutos; en vivo el calendario pasa automáticamente al nuevo día al llegar medianoche. El modo histórico mantiene fija la vista. Una consulta completa del día se reutiliza localmente para desplazar o acercar sin repetir la consulta; Actualizar gráficos renueva los datos guardados en memoria. No se conserva esa copia al cerrar el monitor.
+
+El panel **Dónde hay registros** muestra un mapa permanente de todo el día: las marcas verdes representan minutos con mediciones y el recuadro azul es el tramo visible. El mapa no se borra al arrastrar rápidamente las barras ni depende de la consulta del tramo. Se puede pulsar una marca, usar Primera/Última medición, Ajustar a los datos o elegir un tramo con registros. Ver últimos registros salta a la fecha y hora más recientes guardadas, aunque hoy no tenga datos. No hay que conocer de antemano la hora de una prueba.
+
+`GET /api/chart-coverage?from=...&to=...` agrega los registros por minuto en PostgreSQL para un intervalo diario de hasta 26 horas. Devuelve conteos y tiempos reales, sin fotos ni probabilidades. Incluye todas las mediciones del día aunque el gráfico detallado alcance el límite de 6000 filas. El límite superior del día es exclusivo. La consulta se mantiene al desplazar la vista, se cancela al cambiar de fecha y se completa con IDs nuevos sin contarlos dos veces. Una ventana cubierta por la copia local se dibuja inmediatamente al mover la barra.
 
 El cursor, el toque y las flechas del teclado permiten inspeccionar valores y tramos. Los gráficos conservan las conclusiones registradas, sin recalcularlas con la configuración actual.
 
@@ -278,3 +282,9 @@ Documentación oficial:
 - PG Studio: https://aiven.io/docs/products/postgresql/howto/pg-studio
 - Variables de Railway: https://docs.railway.com/guides/variables
 - Comandos previos al despliegue: https://docs.railway.com/guides/pre-deploy-command
+
+## Publicar la version correcta
+
+Los controles de fecha, graficos y modo demo estan en `main`. El 21 de noviembre se detecto un despliegue manual de una imagen antigua (commit `312d03e`, PR #6) mientras `main` ya incluia los PR #9 y #10. El codigo no se habia perdido: Railway estaba sirviendo otra version.
+
+Para actualizar, desplegar el ultimo commit de `main` y comprobar que el despliegue termina en SUCCESS. Reiniciar o redeployar una entrada antigua del historial puede volver a publicar esa imagen antigua. Despues de publicar, recargar la pagina. Esta correccion web no requiere volver a cargar el firmware que ya funciona en la XIAO.

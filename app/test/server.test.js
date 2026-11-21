@@ -9,6 +9,7 @@ import { createIngestHandler } from '../api/ingest.js';
 import { createStateHandler } from '../api/state.js';
 import { createHistoryHandler } from '../api/history.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
+import { createChartCoverageHandler } from '../api/chart-coverage.js';
 import { classify } from '../lib/model.js';
 
 test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y salud', async () => {
@@ -23,19 +24,21 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     let healthy = true;
     const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading,store.readCameraSettings),
       '/api/state':createStateHandler(store.readCameraView),'/api/history':createHistoryHandler(store.readHistory),
-      '/api/chart-history':createChartHistoryHandler(store.readChartHistory)};
+      '/api/chart-history':createChartHistoryHandler(store.readChartHistory),'/api/chart-coverage':createChartCoverageHandler(store.readChartCoverage)};
     app=createServer({routes,health:async()=>{if(!healthy)throw new Error('test-health');await db.query('SELECT 1');}});
     await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});
     const base='http://127.0.0.1:'+app.server.address().port;
     const request=(path,options)=>fetch(base+path,options);
     assert.equal((await request('/healthz')).status,200);
-    const page=await request('/');assert.match(await page.text(),/Monitor de basura/);
+    const page=await request('/');const pageText=await page.text();assert.match(pageText,/Monitor de basura/);
+    for(const id of ['chartDate','decisionChart','coverageChart','chartSessions','lastAvailableChart'])assert.ok(pageText.includes(`id="${id}"`));
+    assert.match(pageText,/data-chart-minutes="5"/);
     assert.ok(page.headers.get('content-security-policy'));
     for(const path of ['/model/weights.bin','/.env','/server.js','/../package.json'])assert.equal((await request(path)).status,404);
     assert.equal((await request('/api/state')).status,200);
     assert.equal((await request('/api/history')).status,200);
     assert.equal((await request('/api/chart-history')).status,200);
-    for(const path of ['/charts.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
+    for(const path of ['/charts.js','/chart-overview.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
     for(const path of ['/api/export.json','/api/export.csv','/history-format.js','/admin','/admin.js']) assert.equal((await request(path)).status,404);
     assert.doesNotMatch(await(await request('/')).text(),/type="password"|Descargar|exportJSON|exportHistory/);
@@ -54,6 +57,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal(history.entries.length,2);assert.ok(history.nextCursor);
     const graph=await(await request('/api/chart-history?minutes=15')).json();
     assert.equal(graph.entries.length,5);assert.equal(graph.entries[0].scores.length,4);
+    const now=Date.now(),summary=await(await request(`/api/chart-coverage?from=${now-3600000}&to=${now}`)).json();
+    assert.equal(summary.total,5);assert.equal(summary.bins[0].preview,undefined);
     assert.equal(Number((await db.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),5);
     healthy=false;assert.equal((await request('/healthz')).status,503);
     assert.equal((await request('/api/logout',{method:'POST',headers:{cookie}})).status,405);
