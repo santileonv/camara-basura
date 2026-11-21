@@ -1,3 +1,4 @@
+import {sameRoi} from '../public/roi-geometry.js';
 // La decision se actualiza solo al llegar una nueva foto, nunca por visitas a la web.
 export function decisionPolicy(profile = 'stable') {
   if (!['stable', 'demo'].includes(profile)) throw new Error('Perfil de decision invalido.');
@@ -16,6 +17,7 @@ export function decide(previous, reading, { threshold, staleMs, decisionProfile 
     reading.receivedAt - previous.receivedAt > staleMs || previous.threshold !== threshold ||
     (reading.orientationVersion ?? '0') !== (previous.orientationVersion ?? '0') ||
     (reading.rotation ?? 0) !== (previous.rotation ?? 0) ||
+    !sameRoi(reading.roi,previous.roi) ||
     (previous.decisionProfile ?? 'stable') !== decisionProfile;
   const history = reset ? [] : [...previous.history];
   const trashNow = Math.min(1, scores.slice(1).reduce((a, b) => a + b, 0));

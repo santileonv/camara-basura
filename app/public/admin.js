@@ -1,11 +1,17 @@
+import {DEFAULT_ROI,sameRoi} from './roi-geometry.js';
+import {createRoiEditor} from './roi-editor.js';
 const $ = id => document.getElementById(id);
 let csrfToken = null, camera = null, latest = null, authenticated = false, busy = false, timer;
 const percent = value => `${Math.round(value * 100)} %`;
+const imageSize=()=>({width:latest?.imageWidth || $('adminPhoto').naturalWidth || 800,height:latest?.imageHeight || $('adminPhoto').naturalHeight || 600});
+const roiEditor=createRoiEditor({stage:$('roiStage'),box:$('roiBox'),handle:$('roiHandle'),sizeInput:$('roiSize'),xInput:$('roiX'),yInput:$('roiY'),reset:$('resetRoi'),
+  readSize:imageSize,onChange:()=>renderDraft(),isDisabled:()=>busy||!authenticated});
 function setSession(data) {
   authenticated = !!data.authenticated; csrfToken = data.csrfToken || null;
   $('loginPanel').hidden = authenticated; $('adminPanel').hidden = !authenticated;
   if (!authenticated) {
     clearTimeout(timer); camera = null; latest = null; $('adminPhoto').removeAttribute('src');
+    roiEditor.setAvailable(false);
     $('adminStatus').textContent = data.configured === false ? 'El administrador todavía no está configurado en el servidor.' : 'Inicia sesión para cambiar los ajustes.';
   } else $('adminStatus').textContent = 'Solo tu sesión puede guardar cambios. El monitor público sigue disponible.';
 }
@@ -24,24 +30,28 @@ function setBusy(value) {
   busy=value; $('loginButton').disabled=value; $('logoutButton').disabled=value;
   $('reloadSettings').disabled=value; $('cameraRotation').disabled=value;
   $('thresholdPercent').disabled=value; $('thresholdSlider').disabled=value; renderDraft();
+  roiEditor.render();
 }
 function renderDraft() {
   const threshold = Number($('thresholdPercent').value), rotation = Number($('cameraRotation').value);
   const valid = $('thresholdPercent').value.trim() !== '' && Number.isInteger(threshold) && threshold >= 60 && threshold <= 95;
-  const dirty = !!camera && (rotation !== camera.rotation || Math.abs(threshold / 100 - camera.threshold) > .00001);
+  const roi=roiEditor.get();
+  const dirty = !!camera && (rotation !== camera.rotation || Math.abs(threshold / 100 - camera.threshold) > .00001 || !sameRoi(roi,camera.roi ?? DEFAULT_ROI));
+  $('roiSizeValue').textContent=Math.round(roi.size*100)+' %';$('roiXValue').textContent=Math.round(roi.centerX*100)+' %';$('roiYValue').textContent=Math.round(roi.centerY*100)+' %';
   $('trashLimit').textContent=valid ? threshold + ' %' : '—'; $('clearLimit').textContent=valid ? (100-threshold) + ' %' : '—';
   $('saveSettings').disabled=busy || !valid || !dirty;
   $('draftStatus').textContent=!valid ? 'Elige una exigencia entera entre 60 y 95 %.' : dirty ? 'Tienes cambios sin guardar. La vista previa todavía no cambia el análisis.' : 'No hay cambios pendientes.';
   if (latest?.preview) {
     $('adminPhoto').hidden=false; $('adminPhotoEmpty').hidden=true;
     $('adminPhoto').classList.toggle('rotated',rotation !== (latest.rotation ?? 0));
-    $('previewStatus').textContent='Vista previa del giro seleccionado · captura del ' + new Date(latest.receivedAt).toLocaleString('es-CL');
+    $('previewStatus').textContent='Vista previa del giro y la zona seleccionados · captura del ' + new Date(latest.receivedAt).toLocaleString('es-CL');
   }
 }
 function applyConfiguration(data) {
   camera=data.camera; $('cameraRotation').value=String(camera.rotation);
+  roiEditor.set(camera.roi ?? DEFAULT_ROI);
   $('thresholdPercent').value=String(Math.round(camera.threshold*100)); $('thresholdSlider').value=$('thresholdPercent').value;
-  $('savedSettings').textContent=`Guardado: ${camera.rotation === 180 ? 'giro de 180°' : 'orientación normal (0°)'} · exigencia ${percent(camera.threshold)}.`;
+  $('savedSettings').textContent=`Guardado: ${camera.rotation === 180 ? 'giro de 180°' : 'orientación normal (0°)'} · exigencia ${percent(camera.threshold)} · tamaño de zona ${percent((camera.roi ?? DEFAULT_ROI).size)} del lado corto.`;
   $('adminDecisionPolicy').textContent=`${data.decision.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${data.decision.windowSize} capturas y ${data.decision.confirmationsRequired} evaluaciones seguidas para confirmar.`;
   renderDraft();
 }
@@ -57,8 +67,10 @@ async function preview() {
     if(latest?.preview) {
       const src='data:image/jpeg;base64,'+latest.preview;
       if($('adminPhoto').getAttribute('src')!==src)$('adminPhoto').src=src;
+      roiEditor.setAvailable(true);
     }else{
       $('adminPhoto').hidden=true;$('adminPhotoEmpty').hidden=false;$('previewStatus').textContent='Todavía no hay una captura.';
+      roiEditor.setAvailable(false);
     }
     renderDraft();
   }catch{if(authenticated)$('previewStatus').textContent='No se pudo actualizar la vista previa. Se volverá a intentar.';}
@@ -76,7 +88,7 @@ $('loginForm').addEventListener('submit',async event=>{
 $('settingsForm').addEventListener('submit',async event=>{
   event.preventDefault();if(busy||$('saveSettings').disabled)return;setBusy(true);$('adminError').textContent='';
   try{
-    const data=await request('settings',{method:'PUT',body:JSON.stringify({rotation:Number($('cameraRotation').value),threshold:Number($('thresholdPercent').value)/100,expectedVersion:camera.version})});
+    const data=await request('settings',{method:'PUT',body:JSON.stringify({rotation:Number($('cameraRotation').value),threshold:Number($('thresholdPercent').value)/100,expectedVersion:camera.version,roi:roiEditor.get()})});
     applyConfiguration(data);$('adminStatus').textContent=data.message;preview();
   }catch(error){$('adminError').textContent=error.message;}
   finally{setBusy(false);}
@@ -94,6 +106,7 @@ $('logoutButton').addEventListener('click',async()=>{
 $('thresholdPercent').addEventListener('input',()=>{$('thresholdSlider').value=$('thresholdPercent').value;renderDraft();});
 $('thresholdSlider').addEventListener('input',()=>{$('thresholdPercent').value=$('thresholdSlider').value;renderDraft();});
 $('cameraRotation').addEventListener('change',renderDraft);
+$('adminPhoto').addEventListener('load',()=>{roiEditor.render();renderDraft();});
 document.addEventListener('visibilitychange',()=>{clearTimeout(timer);if(!document.hidden&&authenticated)preview();});
 async function start(){
   setBusy(true);

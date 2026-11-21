@@ -1,5 +1,7 @@
 'use strict';
 import { createCharts } from './charts.js';
+import {DEFAULT_ROI,roiBounds} from './roi-geometry.js';
+import {decisionProgress} from './decision-progress.js';
 const $ = id => document.getElementById(id);
 const charts = createCharts();
 const labels = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas'];
@@ -33,15 +35,18 @@ function render() {
   const age = last ? Math.max(0, Math.floor((Date.now() - last.receivedAt) / 1000)) : null;
   $('connection').textContent = pending ? 'Esperando captura con la nueva orientación' : (fresh ? 'Cámara enviando mediciones' : (last ? 'Sin mediciones recientes' : 'Esperando la primera captura'));
   $('dot').className = 'dot' + (fresh ? ' online' : '');
+  const progress=decisionProgress({state:last,online:!!fresh,configurationPending:!!(pending||policyPending),policy});
+  $('decisionProgress').setAttribute('data-phase',progress.phase);
+  $('progressTitle').textContent=progress.title;$('progressHelp').textContent=progress.detail;
+  $('captureCount').textContent=`${progress.samples} / ${progress.requiredSamples}`;
+  $('confirmationCount').textContent=`${progress.confirmations} / ${progress.requiredConfirmations}`;
+  $('captureProgress').max=progress.requiredSamples;$('captureProgress').value=progress.samples;
+  $('confirmationProgress').max=progress.requiredConfirmations;$('confirmationProgress').value=progress.confirmations;
   $('age').textContent = age === null ? '—' : 'Última captura hace ' + age + ' s';
   const conclusion = policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
-  const ambiguous = fresh && last.readings >= 3 && last.trashAverage < last.threshold && 1 - last.trashAverage < last.threshold;
-  $('detail').textContent = policyPending ? 'La próxima captura inicia el promedio con la configuración nueva.' : pending ? 'El giro está guardado. La conclusión se actualizará con las próximas capturas.' : (fresh ?
-    (ambiguous ? 'La evidencia es ambigua: el promedio de basura está entre los dos umbrales de decisión.' :
-      (last.streak >= policy.confirmationsRequired ? `Resultado confirmado con ${policy.confirmationsRequired} evaluaciones consecutivas.` : 'Reuniendo capturas y confirmaciones para una decisión estable.')) :
-    'Revisa que la XIAO tenga alimentación, Wi-Fi e Internet.');
+  $('detail').textContent=progress.phase==='collecting' ? 'Todavía faltan capturas para empezar a evaluar.' : progress.phase==='confirming' ? 'El promedio apoya un resultado. Falta confirmarlo con las siguientes capturas.' : progress.phase==='uncertain' ? 'La evidencia es ambigua: aún no apoya una conclusión clara.' : progress.phase==='confirmed' ? 'La conclusión reúne las capturas y confirmaciones necesarias.' : progress.detail;
   // La barra expresa confianza en la conclusion mostrada. La suma de basura
   // se mantiene separada: para "Sin basura" usamos su complemento.
   const confidence = fresh && conclusion === 'Hay basura' ? last.trashAverage :
@@ -57,11 +62,18 @@ function render() {
   $('trashAverage').textContent = fresh ? percent(last.trashAverage) : '—';
   $('averageLabel').textContent = fresh ? `Promedio de basura · ${last.readings} ${last.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de basura de las últimas capturas';
   rows.forEach((row, i) => { row.value.textContent = fresh ? percent(last.scores[i]) : '—'; row.fill.style.width = fresh ? last.scores[i] * 100 + '%' : '0%'; });
-  $('window').textContent = pending ? 'El promedio empezará de nuevo con la orientación elegida.' : (fresh ? `Promedio de ${last.readings}/${last.windowSize ?? policy.windowSize} capturas · Confirmación ${last.streak}/${last.confirmationsRequired ?? policy.confirmationsRequired}` : 'La lectura anterior no se presenta como una medición actual.');
+  $('window').textContent = fresh ? `Promedio móvil de ${last.readings} capturas. Cada confirmación evalúa un promedio actualizado; no es un grupo independiente de capturas.` : 'La lectura anterior no se presenta como una medición actual.';
   $('threshold').textContent = `Sobre el promedio: Hay basura ≥ ${percent(activeThreshold)} · Sin basura ≤ ${percent(1 - activeThreshold)}. Entre ambos: No seguro.`;
   $('decisionRules').textContent = `${policy.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${policy.windowSize} capturas y ${policy.confirmationsRequired} evaluaciones consecutivas para confirmar.`;
   $('received').textContent = last ? new Date(last.receivedAt).toLocaleString('es-CL') : '—';
   $('analysis').textContent = last ? last.analysisMs + ' ms' : '—';
+  if(last?.preview){
+    const width=last.imageWidth || $('photo').naturalWidth || 800,height=last.imageHeight || $('photo').naturalHeight || 600;
+    const region=(pending||policyPending) ? roiBounds(width,height,camera.roi ?? DEFAULT_ROI) : last.analysisRegion ?? roiBounds(width,height,last.roi ?? DEFAULT_ROI);
+    $('photoFrame').style.aspectRatio=width+'/'+height;
+    $('crop').style.left=region.x*100+'%';$('crop').style.top=region.y*100+'%';
+    $('crop').style.width=region.width*100+'%';$('crop').style.height=region.height*100+'%';
+  }
 }
 async function poll() {
   clearTimeout(timer);
@@ -124,6 +136,7 @@ async function loadHistory(reset = false) {
 }
 $('refreshHistory').onclick = () => loadHistory(true);
 $('moreHistory').onclick = () => loadHistory(false);
+$('photo').addEventListener('load',render);
 function disconnectStream() {
   const old = stream; stream = null; old?.close(); streamConnected = false;
   charts.setRealtime?.(false);

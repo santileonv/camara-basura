@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import {DEFAULT_ROI,roiBounds} from '../public/roi-geometry.js';
+import {decisionProgress} from '../public/decision-progress.js';
 
 // Superficie DOM pequena para ejecutar los eventos reales del monitor sin navegador.
 class Element {
@@ -32,7 +34,7 @@ test('El monitor publico muestra la orientacion fija y la confianza, sin control
     if(url.startsWith('/api/history'))return response({entries:[],nextCursor:null});
     throw Error('Ruta inesperada: '+url);
   };
-  const context=vm.createContext({document,fetch,AbortController,AbortSignal,URL,URLSearchParams,Blob,
+  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,document,fetch,AbortController,AbortSignal,URL,URLSearchParams,Blob,
     setTimeout:fn=>{const id=++timerId;timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id),setInterval(){},createCharts:()=>({start(){},stop(){}})});
   const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
@@ -73,7 +75,7 @@ test('Avisos en vivo: refrescan al guardar, reconcilian un aviso durante una con
     if(url==='/api/state'){stateRequests++;if(stateRequests===1)return new Promise(resolve=>{release=()=>resolve(state());});return state();}
     return response({entries:[],nextCursor:null});
   };
-  const context=vm.createContext({document,fetch,EventSource:Events,AbortSignal,URLSearchParams,createCharts:()=>charts,
+  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,document,fetch,EventSource:Events,AbortSignal,URLSearchParams,createCharts:()=>charts,
     setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),setInterval(){}});
   const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   vm.runInContext(source,context);assert.equal(stateRequests,1);
@@ -81,7 +83,7 @@ test('Avisos en vivo: refrescan al guardar, reconcilian un aviso durante una con
   assert.equal(stateRequests,1);release();await settle();
   const queued=[...timers].find(([,t])=>t.ms===0);assert.ok(queued);timers.delete(queued[0]);queued[1].fn();await settle();
   assert.equal(stateRequests,2);assert.ok(![...timers.values()].some(t=>t.ms===2000));
-  assert.match(get('window').textContent,/3\/3.*2\/2/);assert.match(get('decisionRules').textContent,/3 capturas.*2 evaluaciones/);
+  assert.equal(get('captureCount').textContent,'3 / 3');assert.equal(get('confirmationCount').textContent,'2 / 2');assert.match(get('decisionRules').textContent,/3 capturas.*2 evaluaciones/);
   events.emit('measurement');await settle();assert.equal(stateRequests,3);
   events.onerror();await settle();assert.ok([...timers.values()].some(t=>t.ms===2000));
   assert.ok(chartCalls.some(c=>c[0]==='notify'));assert.ok(chartCalls.some(c=>c[0]==='live'&&c[1]===false));

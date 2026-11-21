@@ -4,7 +4,7 @@ Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor es público y se puede abrir desde cualquier red, sin clave de consulta. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; ambos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
+La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; estos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
 
 **Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
@@ -37,15 +37,29 @@ No hay botones de descarga JSON ni CSV. `GET /api/export.json` ya no está regis
 
 Entra mediante **Acceso de administrador** en el monitor o abre `/admin`. Usa la contraseña privada ya configurada en `DASHBOARD_PASSWORD` en Railway. Opcionalmente, `ADMIN_PASSWORD` permite usar otra clave exclusivamente para el panel; tiene prioridad si existe. La contraseña debe tener al menos 12 caracteres y `SESSION_SECRET` al menos 32. Las credenciales no se incluyen en GitHub, HTML ni respuestas públicas. No hay que volver a programar la XIAO.
 
-Selecciona **Normal · 0°** o **Girada 180°**, elige la exigencia entre **60 % y 95 %** y pulsa **Guardar cambios**. La foto permite previsualizar el giro sin modificar el servidor. Recargar ajustes guardados descarta el borrador y recupera los valores actuales si otra pestaña los cambió.
+Selecciona **Normal · 0°** o **Girada 180°**, ajusta la zona sobre la foto, elige la exigencia entre **60 % y 95 %** y pulsa **Guardar cambios**. La foto permite previsualizar el giro sin modificar el servidor. Recargar ajustes guardados descarta el borrador y recupera los valores actuales si otra pestaña los cambió.
 
 El umbral es simétrico: con 80 %, el promedio de Botellas + Papeles y Cartones + Bolsas debe ser ≥80 % para proponer Hay basura o ≤20 % para proponer Sin basura; entre ambos se propone No seguro. Se mantienen las confirmaciones consecutivas del perfil activo. Reducir el valor facilita confirmar ambos resultados y aumentar el valor exige mayor confianza. La interfaz muestra los dos límites antes de guardar.
 
-`camaras.rotacion` conserva el giro, `umbral_decision` guarda el umbral y `orientacion_version` versiona ambos ajustes. `THRESHOLD` es únicamente el valor inicial si no hay umbral guardado. Los despliegues siguientes conservan los valores elegidos y eliminan la antigua restricción que fijaba el giro. Cambiar un ajuste incrementa la versión y la siguiente captura reinicia el promedio y sus confirmaciones. No se reescriben mediciones anteriores. Una inferencia iniciada con ajustes antiguos se rechaza con 409 si intenta guardarse después de un cambio. Guardar los mismos valores no incrementa la versión ni reinicia el promedio.
+`camaras.rotacion` conserva el giro, `umbral_decision` guarda el umbral y `zona_analisis` guarda el recuadro y `orientacion_version` versiona todos los ajustes. `THRESHOLD` es únicamente el valor inicial si no hay umbral guardado. Los despliegues siguientes conservan los valores elegidos y eliminan la antigua restricción que fijaba el giro. Cambiar un ajuste incrementa la versión y la siguiente captura reinicia el promedio y sus confirmaciones. No se reescriben mediciones anteriores. Una inferencia iniciada con ajustes antiguos se rechaza con 409 si intenta guardarse después de un cambio. Guardar los mismos valores no incrementa la versión ni reinicia el promedio.
 
 Las rutas `/api/admin/session`, `/api/admin/login`, `/api/admin/logout` y `/api/admin/settings` gestionan el acceso. Solo una sesión nueva creada con la contraseña puede consultar o modificar los ajustes. Las cookies de consulta antiguas y el token de la cámara no conceden permisos administrativos. El antiguo `/api/camera-settings` sigue retirado (410). Las rutas de consulta y el monitor siguen públicos; no se reintroducen las descargas de la base.
 
-Las sesiones duran hasta 8 horas, usan tokens aleatorios de 256 bits y se conservan por hash en memoria de la única réplica del servicio. Reiniciar o desplegar cierra las sesiones, pero conserva los ajustes de PostgreSQL. Cerrar sesión revoca el token inmediatamente y cambiar las credenciales invalida las sesiones anteriores. En producción la cookie `__Host-xiao_admin` tiene `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` y no tiene Domain. Cada escritura requiere además un token CSRF y un Origin exactamente coincidente; no se habilita CORS. Tras cinco contraseñas incorrectas se bloquea el origen de conexión durante 15 minutos. La aplicación no confía en X-Forwarded-For recibido: detrás de un proxy varios clientes pueden compartir ese límite. El contenido JSON se limita a 4 KB y se comprueban giro, umbral y versión en el servidor y la base.
+Las sesiones duran hasta 8 horas, usan tokens aleatorios de 256 bits y se conservan por hash en memoria de la única réplica del servicio. Reiniciar o desplegar cierra las sesiones, pero conserva los ajustes de PostgreSQL. Cerrar sesión revoca el token inmediatamente y cambiar las credenciales invalida las sesiones anteriores. En producción la cookie `__Host-xiao_admin` tiene `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` y no tiene Domain. Cada escritura requiere además un token CSRF y un Origin exactamente coincidente; no se habilita CORS. Tras cinco contraseñas incorrectas se bloquea el origen de conexión durante 15 minutos. La aplicación no confía en X-Forwarded-For recibido: detrás de un proxy varios clientes pueden compartir ese límite. El contenido JSON se limita a 4 KB y se comprueban giro, zona, umbral y versión en el servidor y la base.
+
+## Zona de análisis ajustable, solo para el administrador
+
+En `/admin`, reduce o agranda el cuadrado con la esquina inferior derecha o el control **Tamaño del cuadrado**. Arrastra su interior para moverlo; también puedes usar Posición horizontal/vertical o las flechas del teclado (Shift da pasos mayores). La zona se mantiene dentro de la foto. El cuadrado no deforma los objetos al redimensionar a 224 × 224. El tamaño permitido es de 15 a 100 % del lado más corto de la imagen. **Restaurar cuadrado central** recupera el recorte original en el borrador; hay que guardar para aplicarlo.
+
+La zona se define después del giro mediante `{centerX,centerY,size}` en coordenadas relativas a la imagen completa. Por defecto es `{centerX:0.5,centerY:0.5,size:1}`, que conserva el comportamiento anterior. PostgreSQL valida y conserva el JSON. El guardado comparte control de versión, sesión y CSRF con el giro y el umbral; un cliente antiguo que no envíe zona conserva la ya guardada. Cambiar solo la zona también incrementa la versión, invalida inferencias en curso y reinicia la ventana con la siguiente captura. Repetir los mismos valores no la reinicia.
+
+El servidor gira primero, recorta exactamente esa zona y entrega sus píxeles al modelo. Conserva una miniatura de la foto completa orientada para poder editar el recuadro después. La última lectura guarda su zona, dimensiones originales y `analysisRegion` relativa; el monitor público usa esos datos para dibujar un recuadro de solo lectura y oscurecer el exterior. Cuando hay ajustes pendientes, muestra la zona nueva y espera una captura antes de presentar una conclusión vigente. Los controles de edición solo existen en el panel privado; las solicitudes públicas de escritura se rechazan en el servidor. No cambia el firmware ni se requiere cargar otra vez la placa.
+
+## Avance de la decisión
+
+El monitor muestra dos contadores separados: **Capturas mínimas** (3 para empezar) y **Confirmaciones seguidas** (2 en demo o 3 en stable). Indica Reuniendo capturas, Confirmando el resultado, Evidencia no concluyente o Resultado confirmado según las mediciones reales. El contador no avanza con el tiempo ni al refrescar la web. Si el promedio cambia de candidato o cae entre los umbrales, las confirmaciones anteriores dejan de contar. Un cambio de configuración o datos vencidos muestra espera y no presenta el avance anterior como actual.
+
+Cada captura nueva actualiza el promedio móvil y produce una evaluación. Las confirmaciones no son grupos separados de capturas: en demo, con evidencia consistente, las capturas 1 y 2 reúnen datos, la 3 obtiene la primera confirmación y la 4 obtiene la segunda. La confianza de la conclusión permanece en su barra independiente; el progreso de las etapas no se presenta como un porcentaje de confianza.
 
 ## Archivos de configuración y secretos
 
@@ -191,7 +205,7 @@ El WiFi sigue configurándose en `config.h`. Esta entrega no implementa todavía
 ## 6. Lógica de detección
 
 1. La cámara obtiene una imagen de **800 × 600** y la envía por HTTPS.
-2. El servidor recorta el cuadrado central de **600 × 600**, lo reduce a **224 × 224** y aplica la misma normalización del modelo de Teachable Machine.
+2. El servidor gira la imagen y recorta la zona guardada por el administrador (por defecto, el cuadrado central de **600 × 600**), la reduce a **224 × 224** y aplica la misma normalización del modelo de Teachable Machine.
 3. El modelo entrega las probabilidades de **Sin basura**, **Botellas**, **Papeles y Cartones** y **Bolsas**.
 4. El sistema suma Botellas + Papeles y Cartones + Bolsas. Así, un objeto puede alternar entre clases de residuos sin impedir la conclusión conjunta.
 5. En demo promedia hasta 3 capturas, empieza a evaluar con 3 y exige 2 confirmaciones. En stable conserva 5 capturas y 3 confirmaciones. La pagina indica el perfil y los limites correspondientes.
@@ -200,7 +214,7 @@ El WiFi sigue configurándose en `config.h`. Esta entrega no implementa todavía
 La barra principal muestra la confianza estimada en la conclusión confirmada: el promedio de basura para **Hay basura**, o `1 − promedio de basura` para **Sin basura**. Por ejemplo, un promedio de basura del 10 % se presenta como 90 % de confianza de que no hay basura. Para **No seguro**, datos vencidos o un cambio de orientación pendiente, no se muestra un porcentaje de confianza. El panel de clases presenta por separado la suma de basura de la última captura y el promedio de las últimas capturas. Estas puntuaciones del modelo no son una garantía de acierto ni una medida de cantidad de residuos.
 7. El nuevo estado y la medición se guardan juntos en PostgreSQL. Si falla la escritura, no se da por guardado un estado parcial.
 
-Con evidencia consistente, la primera conclusion llega en la cuarta captura en demo y en la quinta en stable. Un reinicio de la camara, un corte largo, un cambio de perfil o un cambio de umbral reinician la ventana de confirmacion. Refrescar la web no añade mediciones.
+Con evidencia consistente, la primera conclusion llega en la cuarta captura en demo y en la quinta en stable. Un reinicio de la camara, un corte largo, un cambio de perfil, de zona, de giro o de umbral reinician la ventana de confirmacion. Refrescar la web no añade mediciones.
 
 En demo el objetivo es un ciclo completo de **5 segundos**, incluyendo el trabajo y la espera restante. Si el trabajo supera ese tiempo, el siguiente ciclo comienza al terminar, sin solapamientos. Con DEMO_MODE=false se restaura la pausa de **15 segundos despues de terminar cada envio**. No se transmite video continuo. Si un envío falla, la cámara espera al menos 30 segundos antes de otra captura; no almacena una cola de fotos perdidas durante un corte.
 
@@ -212,7 +226,7 @@ Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**.
 |---|---|
 | `lib/raw-export.js` | Lee todas las mediciones por lotes en una instantánea de solo lectura |
 | `api/export.js` | Handler retirado; responde 404 y no lee la base |
-| `api/camera-settings.js` | Ajuste retirado; devuelve 410 y conserva el montaje fijo |
+| `api/camera-settings.js` | Ruta pública de ajuste retirada; devuelve 410. Los cambios se hacen por /api/admin/settings |
 | `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
 | `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
 | `scripts/import-history.js` | Importador general: `SOURCE_DATABASE_URL` → `DATABASE_URL` |
