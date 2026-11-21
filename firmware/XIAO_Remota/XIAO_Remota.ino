@@ -11,11 +11,16 @@
 #include "esp_system.h"
 #include <time.h>
 #include "certificados.h"
+#include "capture-schedule.h"
 #if __has_include("config.h")
 #include "config.h"
 #else
 #include "config.example.h"
 #endif
+
+// Poner false para restaurar la pausa original de CAPTURE_INTERVAL_MS.
+static constexpr bool DEMO_MODE = true;
+static constexpr uint32_t DEMO_CYCLE_MS = 5000;
 
 static bool configured = false, wifiWasConnected = false;
 static uint32_t lastWifiAttempt = 0, lastClockWarning = 0, nextCapture = 0, sequence = 0;
@@ -128,12 +133,17 @@ void loop() {
     delay(100); return;
   }
   if (static_cast<int32_t>(now - nextCapture) < 0) { delay(50); return; }
+  const uint32_t cycleStarted = millis();
   camera_fb_t *frame = esp_camera_fb_get();
   if (frame) esp_camera_fb_return(frame); // Descartar un cuadro para pedir uno reciente.
   frame = esp_camera_fb_get();
   bool sent = false;
   if (frame) { sent = sendPhoto(frame); esp_camera_fb_return(frame); }
   else Serial.println("No se pudo obtener una captura.");
-  const uint32_t pause = sent ? CAPTURE_INTERVAL_MS : (CAPTURE_INTERVAL_MS > 30000 ? CAPTURE_INTERVAL_MS : 30000);
+  const uint32_t elapsed = millis() - cycleStarted;
+  const uint32_t interval = DEMO_MODE ? DEMO_CYCLE_MS : CAPTURE_INTERVAL_MS;
+  const uint32_t pause = capturePauseMs(sent, DEMO_MODE, interval, elapsed);
   nextCapture = millis() + pause;
+  Serial.printf("Ciclo %lu ms | espera %lu ms | modo %s\n", static_cast<unsigned long>(elapsed),
+    static_cast<unsigned long>(pause), DEMO_MODE ? "demo 5s" : "estable");
 }

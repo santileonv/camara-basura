@@ -9,13 +9,14 @@ import history from './api/history.js';
 import chartHistory from './api/chart-history.js';
 import cameraSettings from './api/camera-settings.js';
 import { validateAuthConfig } from './lib/auth.js';
+import { liveEvents } from './lib/live-events.js';
 
 let server, shutdownStarted = false;
 async function shutdown() {
   if (shutdownStarted) return; shutdownStarted = true;
   console.log('Cerrando servidor y conexiones PostgreSQL...');
   if (!server) { await closeDatabase(); return; }
-  server.drain();
+  server.drain(); liveEvents.close();
   const timeout = setTimeout(() => { server.server.closeAllConnections(); process.exit(1); }, 25000); timeout.unref();
   await new Promise(resolve => server.server.close(resolve));
   await closeDatabase(); clearTimeout(timeout);
@@ -28,7 +29,7 @@ try {
   console.log('Preparando tablas PostgreSQL...'); await migrate(getPool());
   console.log('Cargando y preparando el modelo...'); await loadModel();
   await predictRGB(new Uint8Array(224 * 224 * 3));
-  const routes = { '/api/ingest': ingest, '/api/state': state, '/api/history': history, '/api/chart-history': chartHistory, '/api/camera-settings': cameraSettings };
+  const routes = { '/api/events':liveEvents.subscribe, '/api/ingest': ingest, '/api/state': state, '/api/history': history, '/api/chart-history': chartHistory, '/api/camera-settings': cameraSettings };
   server = createServer({ routes, health: () => query('SELECT 1') });
   await new Promise((resolve, reject) => { server.server.once('error', reject); server.server.listen(port, '0.0.0.0', resolve); });
   console.log('Servidor listo. Puerto ' + port + '. Modelo cargado y PostgreSQL conectado.');

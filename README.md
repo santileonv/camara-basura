@@ -17,6 +17,16 @@ La cámara mantiene una rotación fija de 180°, aplicada tanto al análisis com
 | Base de datos actual | PostgreSQL de Aiven |
 | Monitor | https://xiao-monitor-production.up.railway.app |
 
+## Prueba de demostracion: ciclos de 5 segundos
+
+El metodo estable anterior quedo respaldado en la rama `respaldo/metodo-estable-antes-demo-5s`, commit `8d7992c473f197e8dd9d068adfb95ba31b95bf1f`. La comparacion y los pasos completos para restaurarlo estan en [docs/MODO_DEMO_Y_REVERSION.md](docs/MODO_DEMO_Y_REVERSION.md).
+
+La prueba usa `DETECTION_PROFILE=demo` por defecto: promedio de 3 capturas, minimo 3 para evaluar y 2 confirmaciones consecutivas. El firmware actualizado trae `DEMO_MODE=true`: descuenta el trabajo de captura, envio, analisis y respuesta del objetivo de 5000 ms. Es necesario volver a cargar ese firmware en la XIAO; desplegar Railway no cambia el programa de la placa. Conservar el `config.h` privado anterior y copiar tambien el nuevo `capture-schedule.h`.
+
+El servidor avisa por `/api/events` despues de guardar cada medicion. La pagina actualiza estado y graficos en vivo al recibir el aviso, con consultas de respaldo cada 2 s si se corta esa conexion. Se cierra al ocultar la pestaña. No cambia el modelo ni añade dependencias o servicios. La fecha y los graficos historicos no saltan al vivo al llegar una foto.
+
+Para restaurar las reglas anteriores sin perder la interfaz nueva, usar `DETECTION_PROFILE=stable` en Railway y `DEMO_MODE=false` en el firmware, con `CAPTURE_INTERVAL_MS=15000`. Cambiar de perfil reinicia solo el promedio activo en la siguiente captura; conserva las mediciones anteriores. Para restaurar tambien la implementacion web exacta, usar la rama de respaldo como fuente de un PR de restauracion.
+
 ## Consulta pública y administración
 
 La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los dos gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; retirar las descargas no vuelve privados los datos visibles.
@@ -42,7 +52,7 @@ Añadir un archivo a `.gitignore` no elimina una copia que ya estuviera registra
 Debajo de la cámara hay dos vistas complementarias del historial:
 
 - **¿Hay basura?:** gráfico de escalones con solo dos niveles, Hay basura y Sin basura. Los saltos directos se dibujan verticalmente en la hora de la nueva conclusión. Los períodos No seguro interrumpen la línea y se sombrean en amarillo; la falta de datos se representa con rayado. No se convierte la incertidumbre en un resultado negativo.
-- **Probabilidad de basura:** línea principal de la suma de Botellas + Papeles y Cartones + Bolsas promediada en hasta cinco capturas. Las zonas y líneas punteadas muestran los umbrales registrados en cada medición. Las capturas individuales están ocultas por defecto y pueden activarse con Mostrar cada captura. Debajo se distinguen el valor del promedio y el de la captura seleccionada.
+- **Probabilidad de basura:** línea principal de la suma de Botellas + Papeles y Cartones + Bolsas promediada según el perfil activo (3 en demo, 5 en stable). Las zonas y líneas punteadas muestran los umbrales registrados en cada medición. Las capturas individuales están ocultas por defecto y pueden activarse con Mostrar cada captura. Debajo se distinguen el valor del promedio y el de la captura seleccionada.
 
 Se retira el gráfico de porcentajes por clase y la franja duplicada de conclusiones. Las barras de la última captura y la tabla del historial conservan sus datos.
 
@@ -56,7 +66,7 @@ El cursor, el toque y las flechas del teclado permiten inspeccionar valores y tr
 
 `GET /api/chart-history` admite fechas `from` y `to` en milisegundos Unix, sin tope de 24 horas, o una duración positiva `minutes` para iniciar en vivo con la hora del servidor. Rechaza fechas invertidas, futuras y cursores inválidos. Devuelve la primera fecha guardada, la hora del servidor y, si sigue vigente, la conclusión inmediatamente anterior al inicio visible para no dibujar un hueco falso. Añade un índice por cámara y fecha sin borrar datos.
 
-Cada respuesta incluye como máximo 6000 mediciones, sin fotos. Si un intervalo contiene más, lo indica y pide acercar el zoom para ver todo el tramo. El selector permite acceder a cualquier día guardado. En vivo solicita cada 15 segundos solo IDs nuevos, deduplica filas y elimina las que salen del intervalo. El modo histórico no hace consultas periódicas; Actualizar gráficos conserva el intervalo elegido. Mover la barra cancela la consulta anterior y espera 180 ms antes de cargar el nuevo tramo; ocultar la pestaña suspende las consultas. Los IDs se mantienen como texto para preservar BIGINT. No añade dependencias ni cambia el modelo o firmware.
+Cada respuesta incluye como máximo 6000 mediciones, sin fotos. Si un intervalo contiene más, lo indica y pide acercar el zoom para ver todo el tramo. El selector permite acceder a cualquier día guardado. En vivo solicita solo IDs nuevos al recibir avisos; si se desconecta el canal, consulta cada 2 segundos. Deduplica filas y elimina las que salen del intervalo. El modo histórico no hace consultas periódicas; Actualizar gráficos conserva el intervalo elegido. Mover la barra cancela la consulta anterior y espera 180 ms antes de cargar el nuevo tramo; ocultar la pestaña suspende las consultas. Los IDs se mantienen como texto para preservar BIGINT. No añade dependencias ni cambia el modelo; el firmware de esta prueba ajusta la cadencia sin cambiar la camara.
 
 Las líneas se interrumpen cuando la separación supera `STALE_AFTER_SECONDS`. El escalón prolonga cada conclusión confirmada hasta la siguiente medición o hasta que venza ese plazo, lo que ocurra antes. La siguiente conclusión No seguro corta la línea inmediatamente. Si se alcanza el límite de 6000 filas, la interfaz lo indica; el propietario puede consultar los registros completos directamente en Aiven.
 
@@ -174,15 +184,15 @@ El WiFi sigue configurándose en `config.h`. Esta entrega no implementa todavía
 2. El servidor recorta el cuadrado central de **600 × 600**, lo reduce a **224 × 224** y aplica la misma normalización del modelo de Teachable Machine.
 3. El modelo entrega las probabilidades de **Sin basura**, **Botellas**, **Papeles y Cartones** y **Bolsas**.
 4. El sistema suma Botellas + Papeles y Cartones + Bolsas. Así, un objeto puede alternar entre clases de residuos sin impedir la conclusión conjunta.
-5. Promedia hasta cinco capturas recientes. Empieza a evaluar con tres capturas y exige tres confirmaciones consecutivas.
+5. En demo promedia hasta 3 capturas, empieza a evaluar con 3 y exige 2 confirmaciones. En stable conserva 5 capturas y 3 confirmaciones. La pagina indica el perfil y los limites correspondientes.
 6. Con umbral de 80 %, concluye **Hay basura** si el promedio conjunto es ≥80 %, **Sin basura** si es ≤20 % y **No seguro** en la zona intermedia o durante la confirmación.
 
 La barra principal muestra la confianza estimada en la conclusión confirmada: el promedio de basura para **Hay basura**, o `1 − promedio de basura` para **Sin basura**. Por ejemplo, un promedio de basura del 10 % se presenta como 90 % de confianza de que no hay basura. Para **No seguro**, datos vencidos o un cambio de orientación pendiente, no se muestra un porcentaje de confianza. El panel de clases presenta por separado la suma de basura de la última captura y el promedio de las últimas capturas. Estas puntuaciones del modelo no son una garantía de acierto ni una medida de cantidad de residuos.
 7. El nuevo estado y la medición se guardan juntos en PostgreSQL. Si falla la escritura, no se da por guardado un estado parcial.
 
-Con evidencia consistente, la primera conclusión confirmada llega en la quinta captura. Un reinicio de la cámara, un corte largo o un cambio de umbral reinician la ventana de confirmación. Refrescar la web no añade mediciones.
+Con evidencia consistente, la primera conclusion llega en la cuarta captura en demo y en la quinta en stable. Un reinicio de la camara, un corte largo, un cambio de perfil o un cambio de umbral reinician la ventana de confirmacion. Refrescar la web no añade mediciones.
 
-La pausa de captura es de **15 segundos después de terminar cada envío**. El tiempo de red y análisis se suma a esa pausa. No son 15 segundos exactos entre mediciones ni se transmite vídeo continuo. Si un envío falla, la cámara espera al menos 30 segundos antes de otra captura; no almacena una cola de fotos perdidas durante un corte.
+En demo el objetivo es un ciclo completo de **5 segundos**, incluyendo el trabajo y la espera restante. Si el trabajo supera ese tiempo, el siguiente ciclo comienza al terminar, sin solapamientos. Con DEMO_MODE=false se restaura la pausa de **15 segundos despues de terminar cada envio**. No se transmite video continuo. Si un envío falla, la cámara espera al menos 30 segundos antes de otra captura; no almacena una cola de fotos perdidas durante un corte.
 
 Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**. El historial anterior sigue disponible. Los porcentajes son puntuaciones de clasificación; no expresan volumen, cantidad de objetos ni una medición física de basura.
 
@@ -238,7 +248,9 @@ El paquete no incluye `node_modules`. Docker instala solo dependencias de produc
 | `saveReading()` / `readHistory()` | Guarda una captura y recupera páginas de historial. |
 | `migrate()` | Prepara las tablas al arrancar con bloqueo de migración. |
 | `importHistory()` | Copia datos PostgreSQL sin modificar el origen. |
-| `CAPTURE_INTERVAL_MS` | Pausa de la XIAO entre envíos terminados; 15000 ms por defecto. |
+| `CAPTURE_INTERVAL_MS` | Pausa estable de la XIAO; 15000 ms. En DEMO_MODE=true se usa el objetivo total DEMO_CYCLE_MS=5000. |
+| `DETECTION_PROFILE` | demo (3 capturas / 2 confirmaciones) o stable (5 / 3), en Railway. |
+| `DEMO_MODE` | true para ciclo total de 5 s, false para la pausa estable; se cambia en el firmware y se vuelve a cargar. |
 | `THRESHOLD` / `STALE_AFTER_SECONDS` | Umbral de decisión y antigüedad máxima de una lectura actual. |
 
 ## 10. Operación y resolución de problemas

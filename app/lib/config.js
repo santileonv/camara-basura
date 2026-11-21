@@ -2,10 +2,12 @@ export const LABELS = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas']
 export function settings() {
   const threshold = Number(process.env.THRESHOLD || 0.8);
   const staleMs = Number(process.env.STALE_AFTER_SECONDS || 90) * 1000;
+  const decisionProfile = process.env.DETECTION_PROFILE || 'demo';
+  if (!['demo', 'stable'].includes(decisionProfile)) throw new Error('DETECTION_PROFILE debe ser demo o stable.');
   if (!(threshold >= 0.6 && threshold <= 0.95) || !(staleMs >= 30000 && staleMs <= 3600000)) {
     throw new Error('THRESHOLD o STALE_AFTER_SECONDS fuera de rango.');
   }
-  return { threshold, staleMs };
+  return { threshold, staleMs, decisionProfile };
 }
 export function reply(res, status, data) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
