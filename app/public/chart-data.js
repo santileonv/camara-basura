@@ -29,6 +29,40 @@ export function clampDayWindow(day, duration, end) {
   return { from:to - span, to };
 }
 
+export function coverageSessions(bins, gapMs = 90000) {
+  const sessions=[];
+  for (const bin of bins) {
+    const previous=sessions.at(-1);
+    if (previous && bin.firstAt-previous.to<=Math.max(60000,gapMs)) {
+      previous.to=Math.max(previous.to,bin.lastAt);previous.count+=bin.count;
+    } else sessions.push({from:bin.firstAt,to:bin.lastAt,count:bin.count});
+  }
+  return sessions;
+}
+export function nearestCoverageTimestamp(bins, timestamp) {
+  let best=null,distance=Infinity;
+  for (const bin of bins) for (const stamp of [bin.firstAt,bin.lastAt])
+    if (Math.abs(stamp-timestamp)<distance) {best=stamp;distance=Math.abs(stamp-timestamp);}
+  return best;
+}
+// Completar el mapa con avisos nuevos sin contar dos veces IDs ya agregados en SQL.
+export function extendCoverage(coverage, entries, day) {
+  if (!coverage) return null;
+  const bins=new Map(coverage.bins.map(bin=>[bin.index,{...bin}]));
+  let cursor=coverage.cursor,total=coverage.total;const seen=new Set();
+  for (const row of entries) {
+    if (row.receivedAt<day.from || row.receivedAt>=day.to || BigInt(row.id)<=BigInt(coverage.cursor) || seen.has(row.id)) continue;
+    seen.add(row.id);
+    const index=Math.floor((row.receivedAt-day.from)/60000),bin=bins.get(index);
+    if (bin) {bin.count++;bin.firstAt=Math.min(bin.firstAt,row.receivedAt);bin.lastAt=Math.max(bin.lastAt,row.receivedAt);}
+    else bins.set(index,{index,count:1,firstAt:row.receivedAt,lastAt:row.receivedAt,lastId:row.id});
+    if (BigInt(row.id)>BigInt(cursor)) cursor=row.id;
+    total++;
+  }
+  const sorted=[...bins.values()].sort((a,b)=>a.index-b.index);
+  return {...coverage,bins:sorted,cursor,total,firstAt:sorted[0]?.firstAt ?? null,lastAt:sorted.at(-1)?.lastAt ?? null};
+}
+
 export function mergeChartEntries(previous, incoming, from, to, limit = 6000) {
   const unique = new Map([...previous, ...incoming].map(row => [row.id, row]));
   return [...unique.values()].filter(row => row.receivedAt >= from && row.receivedAt <= to)

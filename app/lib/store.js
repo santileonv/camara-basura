@@ -116,7 +116,8 @@ export function createStore(execute) {
     // El limite inicial permite recorrer todos los dias guardados, sin un tope de 24 horas.
     // No repetir esta consulta en cada actualizacion incremental en vivo.
     const extent = after === null ? (await execute(`SELECT
-      (extract(epoch FROM min(recibido_en)) * 1000)::double precision AS "earliestAt"
+      (extract(epoch FROM min(recibido_en)) * 1000)::double precision AS "earliestAt",
+      (extract(epoch FROM max(recibido_en)) * 1000)::double precision AS "latestAt"
       FROM mediciones WHERE camara_id = $1`, [CAMERA_ID]))[0] : null;
     const context = (await execute(`SELECT
       (extract(epoch FROM recibido_en) * 1000)::double precision AS "receivedAt", conclusion
@@ -125,8 +126,27 @@ export function createStore(execute) {
       AND recibido_en >= to_timestamp($3::double precision / 1000.0)
       ORDER BY recibido_en DESC, id DESC LIMIT 1`, [CAMERA_ID, from, Math.max(0, from - staleMs)]))[0] ?? null;
     return { entries: rows.slice(0, limit).reverse(), cursor: rows[0]?.id ?? after ?? '0',
-      from, to, ...(extent ? {earliestAt:extent.earliestAt} : {}), context, truncated: rows.length > limit, limit };
+      from, to, ...(extent ? {earliestAt:extent.earliestAt,latestAt:extent.latestAt} : {}), context, truncated: rows.length > limit, limit };
   }
-  return { readState, saveReading, readHistory, readChartHistory, readCameraSettings, readCameraView, setOrientation };
+  async function readChartCoverage({ from, to, now = Date.now() }) {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || from >= to ||
+      to > now || to - from > 26 * 3600000)
+      throw Object.assign(new Error('Intervalo diario invalido.'), {status:400});
+    // Agregar en PostgreSQL, sin cargar fotos ni limitarse a las ultimas 6000 filas.
+    const bins = await execute(`SELECT
+      floor(((extract(epoch FROM recibido_en) * 1000) - $2::double precision) / 60000)::integer AS index,
+      count(*)::integer AS count,
+      (extract(epoch FROM min(recibido_en)) * 1000)::double precision AS "firstAt",
+      (extract(epoch FROM max(recibido_en)) * 1000)::double precision AS "lastAt",
+      max(id)::text AS "lastId"
+      FROM mediciones WHERE camara_id = $1
+      AND recibido_en >= to_timestamp($2::double precision / 1000.0)
+      AND recibido_en < to_timestamp($3::double precision / 1000.0)
+      GROUP BY 1 ORDER BY 1`, [CAMERA_ID, from, to]);
+    let cursor = '0'; for (const bin of bins) if (BigInt(bin.lastId) > BigInt(cursor)) cursor = bin.lastId;
+    return {from,to,bins,cursor,total:bins.reduce((sum,bin)=>sum+bin.count,0),
+      firstAt:bins[0]?.firstAt ?? null,lastAt:bins.at(-1)?.lastAt ?? null};
+  }
+  return { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation };
 }
-export const { readState, saveReading, readHistory, readChartHistory, readCameraSettings, readCameraView, setOrientation } = createStore(query);
+export const { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation } = createStore(query);
