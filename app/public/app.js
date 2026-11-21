@@ -4,7 +4,7 @@ import {DEFAULT_ROI,roiBounds} from './roi-geometry.js';
 import {decisionProgress} from './decision-progress.js';
 const $ = id => document.getElementById(id);
 const charts = createCharts();
-const labels = ['Sin basura', 'Botellas', 'Papeles y Cartones', 'Bolsas'];
+const labels = ['Sin basura', 'Hay basura'];
 const rows = labels.map(label => {
   const row = document.createElement('div'); row.className = 'classRow';
   const title = document.createElement('div'); title.className = 'classLabel';
@@ -58,10 +58,10 @@ function render() {
   $('totalFill').style.width = confidence === null ? '0%' : confidence * 100 + '%';
   $('confidenceHelp').textContent = confidence === null ? 'El porcentaje aparecerá cuando haya una conclusión confirmada.' :
     'Confianza estimada del modelo, calculada con el promedio de las últimas capturas.';
-  $('now').textContent = fresh ? percent(last.trashNow) : '—';
   $('trashAverage').textContent = fresh ? percent(last.trashAverage) : '—';
   $('averageLabel').textContent = fresh ? `Promedio de basura · ${last.readings} ${last.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de basura de las últimas capturas';
-  rows.forEach((row, i) => { row.value.textContent = fresh ? percent(last.scores[i]) : '—'; row.fill.style.width = fresh ? last.scores[i] * 100 + '%' : '0%'; });
+  const captureScores = fresh ? [last.scores[0], last.trashNow] : [0, 0];
+  rows.forEach((row, i) => { row.value.textContent = fresh ? percent(captureScores[i]) : '—'; row.fill.style.width = captureScores[i] * 100 + '%'; });
   $('window').textContent = fresh ? `Promedio móvil de ${last.readings} capturas. Cada confirmación evalúa un promedio actualizado; no es un grupo independiente de capturas.` : 'La lectura anterior no se presenta como una medición actual.';
   $('threshold').textContent = `Sobre el promedio: Hay basura ≥ ${percent(activeThreshold)} · Sin basura ≤ ${percent(1 - activeThreshold)}. Entre ambos: No seguro.`;
   $('decisionRules').textContent = `${policy.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${policy.windowSize} capturas y ${policy.confirmationsRequired} evaluaciones consecutivas para confirmar.`;
