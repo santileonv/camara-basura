@@ -27,13 +27,13 @@ export function createDayOverview({getDay,getView,getNow,onJump,onFit,onLastAvai
     if(!active)return;
     const {day,x}=frame();svg.replaceChildren();svg.setAttribute('viewBox',`0 0 ${width} 78`);
     svg.append(svgNode('title',{},'Registros de todo el día. Verde: hay mediciones. Azul: intervalo visible.'));
-    svg.append(svgNode('rect',{x:12,y:22,width:width-24,height:22,rx:3,fill:'#e9efe7'}));
-    if(day.to>getNow())svg.append(svgNode('rect',{x:x(Math.max(day.from,getNow())),y:22,width:Math.max(0,x(day.to)-x(Math.max(day.from,getNow()))),height:22,fill:'#edf2f8'}));
+    svg.append(svgNode('rect',{x:12,y:22,width:width-24,height:22,rx:3,fill:'var(--chart-map)'}));
+    if(day.to>getNow())svg.append(svgNode('rect',{x:x(Math.max(day.from,getNow())),y:22,width:Math.max(0,x(day.to)-x(Math.max(day.from,getNow()))),height:22,fill:'var(--chart-future)'}));
     for(const bin of data?.bins ?? []) {
-      const mark=svgNode('rect',{x:x(bin.firstAt),y:22,width:Math.max(2,x(Math.min(day.to,day.from+(bin.index+1)*60000))-x(bin.firstAt)),height:22,rx:1,fill:'#398767',class:'coverageMark'});
+      const mark=svgNode('rect',{x:x(bin.firstAt),y:22,width:Math.max(2,x(Math.min(day.to,day.from+(bin.index+1)*60000))-x(bin.firstAt)),height:22,rx:1,fill:'var(--chart-mark)',class:'coverageMark'});
       mark.append(svgNode('title',{},`${time(bin.firstAt)} — ${time(bin.lastAt)} · ${bin.count} mediciones`));svg.append(mark);
     }
-    viewport=svgNode('rect',{y:16,height:34,rx:4,fill:'#4678be10',stroke:'#4678be','stroke-width':2,'pointer-events':'none'});svg.append(viewport);drawViewport();
+    viewport=svgNode('rect',{y:16,height:34,rx:4,fill:'var(--chart-viewport-fill)',stroke:'var(--chart-viewport)','stroke-width':2,'pointer-events':'none'});svg.append(viewport);drawViewport();
     const base=new Date(day.from);
     for(const hour of width<450?[0,12,24]:[0,6,12,18,24]){
       const stamp=new Date(base.getFullYear(),base.getMonth(),base.getDate(),hour).getTime();

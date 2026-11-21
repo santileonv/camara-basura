@@ -27,6 +27,12 @@ El servidor avisa por `/api/events` despues de guardar cada medicion. La pagina 
 
 Para restaurar las reglas anteriores sin perder la interfaz nueva, usar `DETECTION_PROFILE=stable` en Railway y `DEMO_MODE=false` en el firmware, con `CAPTURE_INTERVAL_MS=15000`. Cambiar de perfil reinicia solo el promedio activo en la siguiente captura; conserva las mediciones anteriores. Para restaurar tambien la implementacion web exacta, usar la rama de respaldo como fuente de un PR de restauracion.
 
+## Apariencia: claro y oscuro
+
+El selector **Claro / Oscuro** está en el encabezado del monitor y de administración. La primera visita respeta la preferencia del dispositivo; después de elegir un tema, se conserva en `localStorage` con la clave `xiao-theme`. La elección se comparte entre ambas páginas y se sincroniza entre pestañas del mismo navegador. Si el almacenamiento está bloqueado, el selector sigue funcionando en la página abierta. El script del tema se ejecuta antes de los estilos para evitar un destello del tema anterior.
+
+Los gráficos SVG, el mapa del día, el calendario, las tablas, los estados y los controles usan la misma paleta mediante variables CSS. Cambiar de tema recolorea lo ya dibujado sin volver a consultar datos ni modificar el intervalo de los gráficos. Se mantienen foco de teclado visible, selección accesible con `aria-pressed`, controles táctiles y respeto a movimiento reducido. No se cargan fuentes, imágenes ni librerías desde servicios externos. La preferencia visual no cambia los ajustes compartidos de la cámara ni requiere administración.
+
 ## Consulta pública y administración
 
 La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los dos gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; retirar las descargas no vuelve privados los datos visibles.
