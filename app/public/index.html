@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitor de basura · XIAO</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/history.css"><link rel="stylesheet" href="/charts.css"><script src="/app.js" type="module"></script></head>
 <body><main>
-<header><div><p class="eyebrow">TALLER DE DISEÑO · XIAO ESP32-S3 SENSE</p><h1>Monitor de basura</h1><p class="intro">Resultados de la cámara, desde cualquier lugar.</p></div></header>
+<header><div><p class="eyebrow">TALLER DE DISEÑO · XIAO ESP32-S3 SENSE</p><h1>Monitor de basura</h1><p class="intro">Resultados de la cámara, desde cualquier lugar.</p><a href="/admin">Acceso de administrador</a></div></header>
 <div id="dashboard">
 <div class="connection"><span id="dot" class="dot"></span><span id="connection">Consultando cámara…</span><span id="age">—</span></div>
 <section id="result" class="card result" aria-live="polite"><p class="eyebrow">CONCLUSIÓN DEL SISTEMA</p><h2 id="conclusion">Esperando datos</h2><p id="detail">La cámara envía las fotos directamente al servidor.</p><div class="total"><span id="confidenceLabel">Confianza estimada en la conclusión</span><strong id="total">—</strong></div><div id="confidenceBar" class="bar mainbar" hidden><div id="totalFill"></div></div><p id="confidenceHelp" class="small">El porcentaje aparecerá cuando haya una conclusión confirmada.</p><p id="window" class="small"></p></section>
@@ -40,10 +40,10 @@
     <p class="eyebrow">2 · EVIDENCIA QUE SUSTENTA LA CONCLUSIÓN</p><h2 id="detectionTitle">Probabilidad de basura</h2>
     <p id="chartWindowDescription" class="chartIntro">La línea gruesa muestra Botellas + Papeles y Cartones + Bolsas, promediadas en las últimas capturas.</p>
     <div class="probabilityControls"><div class="chartLegend"><span><i class="chartSwatch averageSwatch"></i>Promedio de basura</span><span><i class="chartSwatch trashThresholdSwatch"></i>Límite para basura</span><span><i class="chartSwatch clearThresholdSwatch"></i>Límite para sin basura</span></div><label class="captureToggle"><input id="showCaptures" type="checkbox">Mostrar cada captura</label></div>
-    <svg id="detectionChart" class="timeChart" tabindex="0" role="img" aria-label="Porcentaje combinado de basura de 0 a 100 por ciento. Línea gruesa: promedio de hasta cinco capturas. Límites punteados: umbrales de decisión. Usa las flechas para consultar valores." aria-describedby="detectionTooltip thresholdGuide"></svg>
+    <svg id="detectionChart" class="timeChart" tabindex="0" role="img" aria-label="Porcentaje combinado de basura de 0 a 100 por ciento. Línea gruesa: promedio registrado de las últimas capturas. Límites punteados: umbrales de cada medición. Usa las flechas para consultar valores." aria-describedby="detectionTooltip thresholdGuide"></svg>
     <div class="historyScroller" tabindex="0" role="group" aria-label="Desplazamiento horizontal por el día seleccionado, de 00:00 a 24:00."><div class="historyScrollContent"></div></div>
     <div class="scrollLabels"><span class="historyStart">00:00</span><span class="historyEnd">24:00</span></div>
-    <div class="chartReadout"><div><span id="averageSamples" class="readoutLabel">Promedio de hasta 5 capturas</span><strong id="probabilityAverage" class="averageValue">—</strong></div><div><span class="readoutLabel">Captura individual</span><strong id="probabilityCapture">—</strong></div></div>
+    <div class="chartReadout"><div><span id="averageSamples" class="readoutLabel">Promedio de las últimas capturas</span><strong id="probabilityAverage" class="averageValue">—</strong></div><div><span class="readoutLabel">Captura individual</span><strong id="probabilityCapture">—</strong></div></div>
     <p id="detectionTooltip" class="chartExplanation">Consultando mediciones…</p><p id="thresholdGuide" class="thresholdGuide">Los límites punteados muestran los umbrales de decisión.</p>
     <p id="chartDecisionHelp" class="small">Modo demo: 2 evaluaciones consecutivas para confirmar. El porcentaje no representa cantidad ni volumen de residuos.</p>
   </section>

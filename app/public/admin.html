@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administración · Monitor XIAO</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css"><script src="/admin.js" type="module"></script></head>
+<body><main class="adminMain">
+<header><div><p class="eyebrow">MONITOR DE BASURA · XIAO</p><h1>Administración</h1><p class="intro">Ajusta la cámara y la exigencia de la conclusión.</p></div><a class="monitorLink" href="/">Ver monitor público →</a></header>
+<p id="adminStatus" class="small" role="status">Comprobando sesión…</p>
+<section id="loginPanel" class="card loginCard" hidden aria-labelledby="loginTitle"><h2 id="loginTitle">Acceso del administrador</h2><p>El monitor es público. Para cambiar sus ajustes necesitas la contraseña de administrador.</p>
+<form id="loginForm"><label for="adminPassword">Contraseña</label><input id="adminPassword" type="password" autocomplete="current-password" required maxlength="1024"><button id="loginButton" type="submit">Entrar</button></form>
+<p class="small">La sesión dura hasta 8 horas y se cierra al reiniciar el servidor. La contraseña no se guarda en esta página.</p></section>
+<div id="adminPanel" hidden>
+<div class="adminSession"><span>Sesión de administrador activa</span><button id="logoutButton" class="secondary" type="button">Cerrar sesión</button></div>
+<form id="settingsForm">
+<div class="adminGrid">
+<section class="card" aria-labelledby="rotationTitle"><p class="eyebrow">1 · ORIENTACIÓN</p><h2 id="rotationTitle">Giro de la cámara</h2><p>El giro se aplica a la imagen que recibe el modelo y a la foto del monitor.</p>
+<label for="cameraRotation">Orientación</label><select id="cameraRotation"><option value="180">Girada 180°</option><option value="0">Normal · 0°</option></select>
+<div class="adminPhoto"><img id="adminPhoto" alt="Vista previa de la orientación seleccionada" hidden><span id="adminPhotoEmpty">Todavía no hay una captura.</span></div><p id="previewStatus" class="small">Consultando última captura…</p>
+</section>
+<section class="card" aria-labelledby="thresholdTitle"><p class="eyebrow">2 · DECISIÓN</p><h2 id="thresholdTitle">Exigencia para confirmar</h2><p>Porcentaje mínimo de confianza del promedio para proponer una conclusión.</p>
+<label for="thresholdPercent">Exigencia (%)</label><div class="thresholdFields"><input id="thresholdPercent" type="number" min="60" max="95" step="1" required value="80" aria-describedby="thresholdHelp"><span>%</span></div>
+<input id="thresholdSlider" type="range" min="60" max="95" step="1" value="80" aria-label="Ajustar exigencia de conclusión"><div class="thresholdScale"><span>60 % · menos exigente</span><span>95 % · más exigente</span></div>
+<div class="rulePreview"><p><strong>Hay basura:</strong> promedio ≥ <span id="trashLimit">80 %</span></p><p><strong>Sin basura:</strong> promedio ≤ <span id="clearLimit">20 %</span></p><p><strong>No seguro:</strong> entre ambos límites o mientras falten confirmaciones.</p></div>
+<p id="thresholdHelp" class="small">Basura = Botellas + Papeles y Cartones + Bolsas. La exigencia se aplica también a «Sin basura»: con 80 %, se necesita al menos 80 % de confianza de que no hay basura.</p><p id="adminDecisionPolicy" class="small"></p>
+</section>
+</div>
+<section class="card saveCard"><div><h2>Aplicar ajustes</h2><p id="savedSettings" class="small"></p><p id="draftStatus">Los cambios solo se aplican al pulsar Guardar cambios.</p><p class="small">Si cambias el giro o la exigencia, las próximas capturas reiniciarán el promedio y sus confirmaciones. Las mediciones anteriores y sus gráficos conservarán sus resultados originales.</p></div><div class="adminActions"><button id="saveSettings" type="submit" disabled>Guardar cambios</button><button id="reloadSettings" class="secondary" type="button">Recargar ajustes guardados</button></div></section>
+</form>
+</div>
+<p id="adminError" class="error" role="alert"></p><footer>El panel controla los ajustes del servidor. No necesitas volver a programar la XIAO.</footer>
+</main></body></html>

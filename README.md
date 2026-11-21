@@ -4,7 +4,7 @@ Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor es público y se puede abrir desde cualquier red, sin clave de consulta. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-La cámara mantiene una rotación fija de 180°, aplicada tanto al análisis como a la miniatura y guardada en PostgreSQL. No hay controles de giro ni acceso de administración en la página. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
+La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; ambos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
 
 **Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
@@ -33,13 +33,19 @@ La página principal muestra la cámara, la conclusión, los porcentajes, el his
 
 No hay botones de descarga JSON ni CSV. `GET /api/export.json` ya no está registrado en el servidor y el antiguo handler responde 404 incluso con una sesión anterior. Los respaldos y exportaciones del propietario se realizan directamente en Aiven o con una herramienta PostgreSQL, fuera del monitor público.
 
-## Orientación fija de la cámara
+## Administración protegida y ajustes persistentes
 
-El montaje usa siempre **180 grados**. El servidor gira la imagen antes del recorte y del modelo; la miniatura usa la misma orientación. La migración de inicio establece `camaras.rotacion=180` y una restricción PostgreSQL impide volver a 0 grados. La versión de orientación aumenta solamente si fue necesario cambiar el valor anterior; los siguientes reinicios conservan la versión y el promedio.
+Entra mediante **Acceso de administrador** en el monitor o abre `/admin`. Usa la contraseña privada ya configurada en `DASHBOARD_PASSWORD` en Railway. Opcionalmente, `ADMIN_PASSWORD` permite usar otra clave exclusivamente para el panel; tiene prioridad si existe. La contraseña debe tener al menos 12 caracteres y `SESSION_SECRET` al menos 32. Las credenciales no se incluyen en GitHub, HTML ni respuestas públicas. No hay que volver a programar la XIAO.
 
-La actualización no borra mediciones. Si cambia una orientación anterior de 0 a 180, la siguiente captura reinicia su ventana de promedio y confirmaciones para no mezclar imágenes. Hasta que llegue, el monitor indica que espera una captura corregida. La imagen previa también se muestra girada.
+Selecciona **Normal · 0°** o **Girada 180°**, elige la exigencia entre **60 % y 95 %** y pulsa **Guardar cambios**. La foto permite previsualizar el giro sin modificar el servidor. Recargar ajustes guardados descarta el borrador y recupera los valores actuales si otra pestaña los cambió.
 
-El monitor no contiene botones de giro. `/admin`, `/admin.js`, `/api/login` y `/api/logout` se retiraron de las rutas. El antiguo `/api/camera-settings` devuelve 410 sin leer ni modificar la base, incluso si el navegador conserva una sesión anterior. La recepción de imágenes sigue exigiendo `CAMERA_TOKEN`.
+El umbral es simétrico: con 80 %, el promedio de Botellas + Papeles y Cartones + Bolsas debe ser ≥80 % para proponer Hay basura o ≤20 % para proponer Sin basura; entre ambos se propone No seguro. Se mantienen las confirmaciones consecutivas del perfil activo. Reducir el valor facilita confirmar ambos resultados y aumentar el valor exige mayor confianza. La interfaz muestra los dos límites antes de guardar.
+
+`camaras.rotacion` conserva el giro, `umbral_decision` guarda el umbral y `orientacion_version` versiona ambos ajustes. `THRESHOLD` es únicamente el valor inicial si no hay umbral guardado. Los despliegues siguientes conservan los valores elegidos y eliminan la antigua restricción que fijaba el giro. Cambiar un ajuste incrementa la versión y la siguiente captura reinicia el promedio y sus confirmaciones. No se reescriben mediciones anteriores. Una inferencia iniciada con ajustes antiguos se rechaza con 409 si intenta guardarse después de un cambio. Guardar los mismos valores no incrementa la versión ni reinicia el promedio.
+
+Las rutas `/api/admin/session`, `/api/admin/login`, `/api/admin/logout` y `/api/admin/settings` gestionan el acceso. Solo una sesión nueva creada con la contraseña puede consultar o modificar los ajustes. Las cookies de consulta antiguas y el token de la cámara no conceden permisos administrativos. El antiguo `/api/camera-settings` sigue retirado (410). Las rutas de consulta y el monitor siguen públicos; no se reintroducen las descargas de la base.
+
+Las sesiones duran hasta 8 horas, usan tokens aleatorios de 256 bits y se conservan por hash en memoria de la única réplica del servicio. Reiniciar o desplegar cierra las sesiones, pero conserva los ajustes de PostgreSQL. Cerrar sesión revoca el token inmediatamente y cambiar las credenciales invalida las sesiones anteriores. En producción la cookie `__Host-xiao_admin` tiene `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` y no tiene Domain. Cada escritura requiere además un token CSRF y un Origin exactamente coincidente; no se habilita CORS. Tras cinco contraseñas incorrectas se bloquea el origen de conexión durante 15 minutos. La aplicación no confía en X-Forwarded-For recibido: detrás de un proxy varios clientes pueden compartir ese límite. El contenido JSON se limita a 4 KB y se comprueban giro, umbral y versión en el servidor y la base.
 
 ## Archivos de configuración y secretos
 
@@ -136,8 +142,8 @@ El origen se lee en una instantánea de solo lectura. La copia de datos del dest
 | `DATABASE_REQUIRE_TLS` | `true` |
 | `INGEST_PAUSED` | `false` |
 
-3. Conserva `AIVEN_DATABASE_URL` y `AIVEN_CA_CERT`: las referencias finales dependen de ellas. Mantén `CAMERA_TOKEN` sin cambios. Las antiguas variables de acceso al monitor no se usan.
-4. Despliega y espera **SUCCESS**. Verifica `/healthz`, el historial y una descarga JSON. Los conteos y los valores anteriores deben coincidir.
+3. Conserva `AIVEN_DATABASE_URL` y `AIVEN_CA_CERT`: las referencias finales dependen de ellas. Mantén `CAMERA_TOKEN` sin cambios. DASHBOARD_PASSWORD y SESSION_SECRET se usan para el panel privado de administración; no bloquean el monitor público.
+4. Despliega y espera **SUCCESS**. Verifica `/healthz`, el historial y el acceso al panel de administración. Los conteos y los valores anteriores deben coincidir.
 5. Enciende la XIAO y comprueba `HTTP 200`. Actualiza el historial y confirma que se agregan registros nuevos con IDs posteriores.
 6. Solo después de comprobar el traspaso puedes detener el servicio `Postgres` original. Conserva el volumen y un respaldo mientras verificas el funcionamiento; no hace falta eliminarlo para completar la migración.
 

@@ -40,20 +40,19 @@ test('Giro real de 180 grados: miniatura y pixeles de inferencia tienen la misma
   await assert.rejects(prepareImage(jpeg, 90), /Orientacion invalida/);
 });
 
-test('Rotacion fija de 180 grados: conserva historial, rechaza cambios y no se reinicia al desplegar de nuevo', async () => {
+test('Orientacion inicial de 180 grados: conserva historial y no se reinicia al desplegar de nuevo', async () => {
   const db = new PGlite(), execute = executeFor(db), store = createStore(execute);
   try {
     await db.exec(await schema());
-    assert.deepEqual(await store.readCameraSettings(), { rotation:180,version:'0' });
+    assert.deepEqual(await store.readCameraSettings(), { rotation:180,version:'0',threshold:null });
     for (let i=1;i<=5;i++) await store.saveReading(frame(i),config);
     const original=(await store.readHistory()).entries;
     assert.equal((await store.readState()).rotation,180);
-    await assert.rejects(db.query('UPDATE camaras SET rotacion=0'), error=>error.code==='23514');
-    await assert.rejects(store.setOrientation(0,'0'),error=>error.code==='23514');
+    await assert.rejects(db.query('UPDATE camaras SET rotacion=90'), error=>error.code==='23514');
     await assert.rejects(store.saveReading({...frame(6),rotation:0},config),error=>error.status===409);
     const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
     await migrate(pool);await migrate(pool);
-    assert.deepEqual(await store.readCameraSettings(),{rotation:180,version:'0'});
+    assert.deepEqual(await store.readCameraSettings(),{rotation:180,version:'0',threshold:null});
     assert.deepEqual((await store.readHistory()).entries,original);
     const previous=await store.readState();
     await execute('UPDATE estado_camara SET estado=$1::jsonb',[JSON.stringify({...previous,rotation:0})]);
@@ -63,15 +62,15 @@ test('Rotacion fija de 180 grados: conserva historial, rechaza cambios y no se r
   } finally {await db.close();}
 });
 
-test('Migrar una camara normal a 180 grados conserva su nombre y aumenta la version una sola vez',async()=>{
+test('La migracion conserva la orientacion y version elegidas sin forzar el montaje',async()=>{
   const db=new PGlite();
   try {
     await db.exec("CREATE TABLE camaras(id text PRIMARY KEY,nombre text NOT NULL,ubicacion text,creada_en timestamptz NOT NULL DEFAULT now(),rotacion smallint NOT NULL DEFAULT 0,orientacion_version bigint NOT NULL DEFAULT 7); INSERT INTO camaras(id,nombre) VALUES('camara-1','Nombre existente');");
     const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
     await migrate(pool);await migrate(pool);
     assert.equal((await db.query('SELECT nombre FROM camaras')).rows[0].nombre,'Nombre existente');
-    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(),{rotation:180,version:'8'});
-    await assert.rejects(db.query("INSERT INTO camaras(id,nombre,rotacion) VALUES('otra','Otra',0)"),error=>error.code==='23514');
+    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(),{rotation:0,version:'7',threshold:null});
+    await assert.rejects(db.query("INSERT INTO camaras(id,nombre,rotacion) VALUES('otra','Otra',90)"),error=>error.code==='23514');
   }finally{await db.close();}
 });
 
@@ -85,7 +84,7 @@ test('HTTP: el ajuste de giro esta retirado incluso con sesiones anteriores; cad
     app=createServer({health:async()=>{},routes:{
       '/api/state':createStateHandler(store.readCameraView),
       '/api/camera-settings':createCameraSettingsHandler(()=>assert.fail('No debe modificar la camara')),
-      '/api/ingest':createIngestHandler(async(_jpeg,options)=>{seen.push(options.rotation);return{scores:[.05,.45,.4,.1],preview:'preview',analysisMs:12};},store.saveReading,async()=>broken?{rotation:0,version:'0'}:store.readCameraSettings())
+      '/api/ingest':createIngestHandler(async(_jpeg,options)=>{seen.push(options.rotation);return{scores:[.05,.45,.4,.1],preview:'preview',analysisMs:12};},store.saveReading,async()=>broken?{rotation:90,version:'0'}:store.readCameraSettings())
     }});
     await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
     const base='http://127.0.0.1:'+app.server.address().port;

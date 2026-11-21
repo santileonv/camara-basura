@@ -38,9 +38,9 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal((await request('/api/state')).status,200);
     assert.equal((await request('/api/history')).status,200);
     assert.equal((await request('/api/chart-history')).status,200);
-    for(const path of ['/charts.js','/chart-overview.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
+    for(const path of ['/admin','/admin/','/admin.js','/admin.css','/charts.js','/chart-overview.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
-    for(const path of ['/api/export.json','/api/export.csv','/history-format.js','/admin','/admin.js']) assert.equal((await request(path)).status,404);
+    for(const path of ['/api/export.json','/api/export.csv','/history-format.js']) assert.equal((await request(path)).status,404);
     assert.doesNotMatch(await(await request('/')).text(),/type="password"|Descargar|exportJSON|exportHistory/);
     const cookie='xiao_session=sesion-anterior';
     const jpeg=await sharp({create:{width:800,height:600,channels:3,background:'#8f7357'}}).jpeg().toBuffer();
