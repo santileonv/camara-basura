@@ -44,7 +44,7 @@ export function createAdminHandlers({ auth = adminAuth, read = readCameraSetting
       if(req.method!=='PUT')return reply(res,405,{error:'Usa GET o PUT.'});
       auth.requireMutation(req);
       const input=await jsonBody(req);
-      if (!input || typeof input!=='object' || Array.isArray(input) || Object.keys(input).some(key=>!['rotation','threshold','expectedVersion'].includes(key)))
+      if (!input || typeof input!=='object' || Array.isArray(input) || Object.keys(input).some(key=>!['rotation','threshold','expectedVersion','roi'].includes(key)))
         return reply(res,400,{error:'Ajustes no válidos.'});
       const camera=await save(input);
       try {publish();}catch{console.error('No se pudo emitir el aviso de ajustes.');}

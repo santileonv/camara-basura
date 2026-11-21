@@ -1,5 +1,6 @@
 import { decide } from './decision.js';
 import { query } from './database.js';
+import { DEFAULT_ROI, validRoi, sameRoi } from '../public/roi-geometry.js';
 const CAMERA_ID = 'camara-1';
 
 // La revision evita carreras. El estado y la medicion se escriben juntos:
@@ -38,14 +39,14 @@ SELECT estado FROM actualizado CROSS JOIN registrado`;
 
 // La misma implementacion funciona con pg en Railway y PostgreSQL local (PGlite).
 export function createStore(execute) {
-  const cameraColumns = 'rotacion AS rotation, orientacion_version::text AS version, umbral_decision AS threshold';
+  const cameraColumns = 'rotacion AS rotation, orientacion_version::text AS version, umbral_decision AS threshold, zona_analisis AS roi';
   async function readCameraSettings() {
     const rows = await execute('SELECT ' + cameraColumns + ' FROM camaras WHERE id = $1', [CAMERA_ID]);
     if (!rows.length) throw new Error('Camara no configurada.');
     return rows[0];
   }
   async function readCameraView() {
-    const rows = await execute(`SELECT c.rotacion AS rotation, c.orientacion_version::text AS version, c.umbral_decision AS threshold, e.estado
+    const rows = await execute(`SELECT c.rotacion AS rotation, c.orientacion_version::text AS version, c.umbral_decision AS threshold, c.zona_analisis AS roi, e.estado
       FROM camaras c LEFT JOIN estado_camara e ON e.camara_id = c.id WHERE c.id = $1`, [CAMERA_ID]);
     if (!rows.length) throw new Error('Camara no configurada.');
     const { estado, ...camera } = rows[0]; return { camera, state: estado };
@@ -60,14 +61,16 @@ export function createStore(execute) {
     if (!rows.length) throw Object.assign(new Error('La orientacion cambio en otro dispositivo. Actualiza e intentalo nuevamente.'), { status: 409 });
     return rows[0];
   }
-  async function setCameraSettings({ rotation, threshold, expectedVersion }) {
+  async function setCameraSettings({ rotation, threshold, expectedVersion, roi }) {
     if (![0, 180].includes(rotation) || typeof threshold !== 'number' || !Number.isFinite(threshold) || threshold < .60 || threshold > .95 ||
         typeof expectedVersion !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(expectedVersion) || BigInt(expectedVersion) >= 9223372036854775807n)
       throw Object.assign(new Error('Usa giro de 0 o 180 grados y exigencia entre 60 y 95 %.'), {status:400});
-    const rows = await execute(`UPDATE camaras SET rotacion = $2, umbral_decision = $3,
-      orientacion_version = orientacion_version + CASE WHEN rotacion <> $2 OR umbral_decision IS DISTINCT FROM $3::double precision THEN 1 ELSE 0 END
+    if (roi !== undefined && !validRoi(roi)) throw Object.assign(new Error('Zona de análisis inválida. El tamaño debe estar entre 15 y 100 % del lado corto.'), {status:400});
+    const rows = await execute(`UPDATE camaras SET rotacion=$2, umbral_decision=$3, zona_analisis=COALESCE($5::jsonb,zona_analisis),
+      orientacion_version = orientacion_version + CASE WHEN rotacion <> $2 OR umbral_decision IS DISTINCT FROM $3::double precision
+        OR ($5::jsonb IS NOT NULL AND zona_analisis <> $5::jsonb) THEN 1 ELSE 0 END
       WHERE id = $1 AND orientacion_version = $4::bigint RETURNING ` + cameraColumns,
-    [CAMERA_ID, rotation, threshold, expectedVersion]);
+    [CAMERA_ID, rotation, threshold, expectedVersion,roi === undefined ? null : JSON.stringify(roi)]);
     if (!rows.length) throw Object.assign(new Error('Los ajustes cambiaron en otra pestaña. Recarga los valores antes de guardar.'), {status:409});
     return rows[0];
   }
@@ -77,11 +80,11 @@ export function createStore(execute) {
   }
   async function readState() { return (await readVersionedState()).estado; }
   async function saveReading(reading, config) {
-    reading = { ...reading, rotation: reading.rotation ?? 180, orientationVersion: reading.orientationVersion ?? '0' };
+    reading = { ...reading, rotation:reading.rotation ?? 180,orientationVersion:reading.orientationVersion ?? '0',roi:reading.roi ?? DEFAULT_ROI };
     for (let attempt = 0; attempt < 5; attempt++) {
       const camera = await readCameraSettings();
-      if (camera.version !== reading.orientationVersion || camera.rotation !== reading.rotation)
-        throw Object.assign(new Error('La orientacion cambio durante el analisis. Espera una nueva captura.'), { status: 409 });
+      if (camera.version !== reading.orientationVersion || camera.rotation !== reading.rotation || !sameRoi(camera.roi,reading.roi))
+        throw Object.assign(new Error('Los ajustes cambiaron durante el análisis. Espera una nueva captura.'), {status:409});
       const previous = await readVersionedState();
       const next = decide(previous.estado, reading, { ...config, threshold:camera.threshold ?? config.threshold });
       if (next === previous.estado) return previous.estado;

@@ -81,7 +81,7 @@ test('HTTP y PostgreSQL: solo el administrador cambia ajustes; persisten, reinic
     assert.equal((await put({...change,export:true})).status,400);
     assert.equal((await put({...change,expectedVersion:'9223372036854775807'})).status,400);
     const saved=await put();assert.equal(saved.status,200);camera=(await saved.json()).camera;
-    assert.deepEqual(camera,{rotation:0,threshold:.9,version:'1'});assert.equal(notices,1);
+    assert.deepEqual(camera,{rotation:0,threshold:.9,version:'1',roi:{centerX:.5,centerY:.5,size:1}});assert.equal(notices,1);
     assert.equal((await put()).status,409); // Una pestaña antigua no sobrescribe el cambio.
     const pending=await(await fetch(base+'/api/state')).json();
     assert.equal(pending.policyPending,true);assert.equal(pending.orientationPending,true);assert.equal(pending.state.conclusion,'No seguro');

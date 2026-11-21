@@ -2,10 +2,15 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import {DEFAULT_ROI,sameRoi} from '../public/roi-geometry.js';
+import {createRoiEditor} from '../public/roi-editor.js';
 
 class Element {
-  constructor(){this.hidden=false;this.disabled=false;this.value='';this.textContent='';this.attributes={};this.listeners={};const names=new Set();this.classList={toggle(n,on){if(on)names.add(n);else names.delete(n);},contains:n=>names.has(n)};}
+  constructor(){this.hidden=false;this.disabled=false;this.value='';this.textContent='';this.attributes={};this.listeners={};this.style={};const names=new Set();this.classList={toggle(n,on){if(on)names.add(n);else names.delete(n);},contains:n=>names.has(n)};}
   addEventListener(name,fn){this.listeners[name]=fn;}
+  setAttribute(name,value){this.attributes[name]=value;}
+  getBoundingClientRect(){return {left:0,top:0,width:400,height:300};}
+  setPointerCapture(){}
   removeAttribute(name){delete this.attributes[name];}
   getAttribute(name){return this.attributes[name]??null;}
   dispatch(name){return this.listeners[name]?.({preventDefault(){}});}
@@ -14,7 +19,7 @@ const response=(data,status=200)=>({ok:status<300,status,json:async()=>data});
 test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y cierre de sesion',async()=>{
   const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   get('cameraRotation').value='180';get('thresholdPercent').value=get('thresholdSlider').value='80';
-  let current={rotation:180,threshold:.8,version:'0'},conflict=false,expired=false;const calls=[];
+  let current={rotation:180,threshold:.8,version:'0',roi:{...DEFAULT_ROI}},conflict=false,expired=false;const calls=[];
   const decision={profile:'demo',windowSize:3,confirmationsRequired:2};
   const fetch=async(path,options={})=>{
     calls.push({path,...options});
@@ -27,15 +32,15 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
       if(options.method==='PUT'){
         if(conflict)return response({error:'Los ajustes cambiaron en otra pestaña. Recarga los valores antes de guardar.'},409);
         const data=JSON.parse(options.body);assert.equal(options.headers['X-CSRF-Token'],'c'.repeat(64));assert.equal(data.expectedVersion,current.version);
-        current={rotation:data.rotation,threshold:data.threshold,version:'1'};
+        current={rotation:data.rotation,threshold:data.threshold,version:String(BigInt(current.version)+1n),roi:data.roi};
       }
       return response({camera:{...current},decision,message:'Ajustes guardados.'});
     }
     throw Error('Ruta inesperada: '+path);
   };
   const document={hidden:false,getElementById:get,addEventListener(){}};
-  const context=vm.createContext({document,fetch,AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
-  vm.runInContext(await readFile(new URL('../public/admin.js',import.meta.url),'utf8'),context);
+  const context=vm.createContext({document,fetch,DEFAULT_ROI,sameRoi,createRoiEditor,AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
+  vm.runInContext((await readFile(new URL('../public/admin.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,''),context);
   await new Promise(resolve=>setImmediate(resolve));assert.equal(get('loginPanel').hidden,false);assert.equal(get('adminPanel').hidden,true);
   get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await new Promise(resolve=>setImmediate(resolve));
   assert.equal(get('adminPassword').value,'');assert.equal(get('adminPanel').hidden,false);assert.equal(get('saveSettings').disabled,true);
@@ -45,7 +50,9 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
   assert.ok(!calls.some(c=>c.method==='PUT'));assert.equal(get('saveSettings').disabled,false);
   get('thresholdPercent').value='59';await get('thresholdPercent').dispatch('input');assert.equal(get('saveSettings').disabled,true);
   get('thresholdPercent').value='90';await get('thresholdPercent').dispatch('input');await get('settingsForm').dispatch('submit');
-  assert.deepEqual(current,{rotation:0,threshold:.9,version:'1'});assert.equal(get('saveSettings').disabled,true);
+  assert.deepEqual(current,{rotation:0,threshold:.9,version:'1',roi:{...DEFAULT_ROI}});assert.equal(get('saveSettings').disabled,true);
+  get('roiSize').value='60';await get('roiSize').dispatch('input');assert.equal(get('saveSettings').disabled,false);assert.equal(current.roi.size,1);
+  await get('settingsForm').dispatch('submit');assert.equal(current.roi.size,.6);assert.equal(current.version,'2');assert.equal(get('saveSettings').disabled,true);
   get('thresholdPercent').value='70';await get('thresholdPercent').dispatch('input');conflict=true;await get('settingsForm').dispatch('submit');
   assert.equal(get('thresholdPercent').value,'70');assert.match(get('adminError').textContent,/otra pestaña/);
   await get('reloadSettings').dispatch('click');assert.equal(get('thresholdPercent').value,'90');

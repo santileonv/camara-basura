@@ -24,6 +24,18 @@ ALTER TABLE camaras ALTER COLUMN rotacion SET DEFAULT 180;
 ALTER TABLE camaras DROP CONSTRAINT IF EXISTS camaras_rotacion_fija;
 ALTER TABLE camaras ADD COLUMN IF NOT EXISTS umbral_decision double precision
   CHECK (umbral_decision BETWEEN 0.60 AND 0.95);
+-- Recuadro cuadrado: centro relativo a la imagen orientada y tamaño respecto al lado corto.
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS zona_analisis jsonb NOT NULL
+  DEFAULT '{"centerX":0.5,"centerY":0.5,"size":1}'::jsonb
+  CHECK (CASE WHEN jsonb_typeof(zona_analisis)='object'
+    AND jsonb_typeof(zona_analisis->'centerX')='number'
+    AND jsonb_typeof(zona_analisis->'centerY')='number'
+    AND jsonb_typeof(zona_analisis->'size')='number'
+    THEN zona_analisis=jsonb_build_object('centerX',zona_analisis->'centerX','centerY',zona_analisis->'centerY','size',zona_analisis->'size')
+      AND (zona_analisis->>'centerX')::numeric BETWEEN 0 AND 1
+      AND (zona_analisis->>'centerY')::numeric BETWEEN 0 AND 1
+      AND (zona_analisis->>'size')::numeric BETWEEN 0.15 AND 1
+    ELSE false END);
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'camaras'::regclass AND conname = 'camaras_rotacion_valida') THEN
     ALTER TABLE camaras ADD CONSTRAINT camaras_rotacion_valida CHECK (rotacion IN (0, 180));

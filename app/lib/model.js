@@ -2,6 +2,7 @@ import * as tf from '@tensorflow/tfjs';
 import sharp from 'sharp';
 import { readFile } from 'node:fs/promises';
 import { LABELS } from './config.js';
+import { DEFAULT_ROI, roiPixels, roiBounds } from '../public/roi-geometry.js';
 
 let ready;
 async function initialize() {
@@ -31,27 +32,27 @@ export async function loadModel() {
 }
 // Serializar inferencias dentro de una instancia evita solapar tensores y cargas CPU.
 let tail = Promise.resolve();
-export function classify(jpeg, { rotation = 0 } = {}) {
-  const task = tail.then(() => infer(jpeg, rotation)); tail = task.catch(() => {}); return task;
+export function classify(jpeg, { rotation = 0, roi = DEFAULT_ROI } = {}) {
+  const task = tail.then(() => infer(jpeg, rotation, roi)); tail = task.catch(() => {}); return task;
 }
 // La miniatura y los pixeles del modelo parten de la misma imagen orientada.
-export async function prepareImage(jpeg, rotation = 0) {
+export async function prepareImage(jpeg, rotation = 0, roi = DEFAULT_ROI) {
   if (![0, 180].includes(rotation)) throw new Error('Orientacion invalida.');
   const image = sharp(jpeg, { limitInputPixels: 16000000, failOn: 'warning' });
   const meta = await image.metadata();
   if (meta.format !== 'jpeg' || !meta.width || !meta.height) throw Object.assign(new Error('Se requiere una foto JPEG valida.'), { status: 415 });
   image.rotate(rotation);
-  const size = Math.min(meta.width, meta.height);
-  const { data } = await image.clone().extract({ left: Math.floor((meta.width - size) / 2), top: Math.floor((meta.height - size) / 2), width: size, height: size })
+  const region=roiPixels(meta.width,meta.height,roi);
+  const { data } = await image.clone().extract(region)
     .resize(224, 224, { kernel: 'linear' }).removeAlpha().toColourspace('srgb').raw().toBuffer({ resolveWithObject: true });
   const preview = await image.clone().resize({ width: 320, withoutEnlargement: true }).jpeg({ quality: 55 }).toBuffer();
-  return { rgb: data, preview };
+  return { rgb:data, preview, imageWidth:meta.width,imageHeight:meta.height,analysisRegion:roiBounds(meta.width,meta.height,roi) };
 }
-async function infer(jpeg, rotation) {
+async function infer(jpeg, rotation, roi) {
   const start = performance.now(), model = await loadModel();
-  const { rgb, preview } = await prepareImage(jpeg, rotation);
+  const { rgb, preview, ...geometry } = await prepareImage(jpeg, rotation, roi);
   const scores = await predictRGB(rgb, model);
-  return { scores, preview: preview.toString('base64'), analysisMs: Math.round(performance.now() - start) };
+  return { scores, preview:preview.toString('base64'),...geometry, analysisMs:Math.round(performance.now()-start) };
 }
 export async function predictRGB(rgb, model = null) {
   model ||= await loadModel();
