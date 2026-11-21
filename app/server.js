@@ -10,6 +10,8 @@ import chartHistory from './api/chart-history.js';
 import chartCoverage from './api/chart-coverage.js';
 import cameraSettings from './api/camera-settings.js';
 import { adminHandlers } from './api/admin.js';
+import {operationHandlers} from './api/operations.js';
+import {createAdminExportHandler} from './api/admin-export.js';
 import { validateAuthConfig } from './lib/auth.js';
 import { liveEvents } from './lib/live-events.js';
 
@@ -33,6 +35,9 @@ try {
   await predictRGB(new Uint8Array(224 * 224 * 3));
   const routes = { '/api/events':liveEvents.subscribe, '/api/ingest': ingest, '/api/state': state, '/api/history': history, '/api/chart-history': chartHistory, '/api/chart-coverage':chartCoverage, '/api/camera-settings': cameraSettings };
   for (const [name, handler] of Object.entries(adminHandlers)) routes['/api/admin/' + name] = handler;
+  routes['/api/admin/operations']=operationHandlers.operations;
+  routes['/api/device/control']=operationHandlers.control;
+  routes['/api/admin/export']=createAdminExportHandler();
   server = createServer({ routes, health: () => query('SELECT 1') });
   await new Promise((resolve, reject) => { server.server.once('error', reject); server.server.listen(port, '0.0.0.0', resolve); });
   console.log('Servidor listo. Puerto ' + port + '. Modelo cargado y PostgreSQL conectado.');

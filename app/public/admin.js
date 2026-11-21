@@ -1,7 +1,9 @@
 import {DEFAULT_ROI,sameRoi} from './roi-geometry.js';
 import {createRoiEditor} from './roi-editor.js';
+import {createAdminTools} from './admin-tools.js';
 const $ = id => document.getElementById(id);
 let csrfToken = null, camera = null, latest = null, authenticated = false, busy = false, timer;
+const adminTools=createAdminTools({get:$,document,request,getCamera:()=>camera,isAuthenticated:()=>authenticated,isBusy:()=>busy,onBusy:setBusy,onCamera:next=>{camera=next;renderDraft();},onError:message=>{$('adminError').textContent=message;}});
 const percent = value => `${Math.round(value * 100)} %`;
 const imageSize=()=>({width:latest?.imageWidth || $('adminPhoto').naturalWidth || 800,height:latest?.imageHeight || $('adminPhoto').naturalHeight || 600});
 const roiEditor=createRoiEditor({stage:$('roiStage'),box:$('roiBox'),handle:$('roiHandle'),sizeInput:$('roiSize'),xInput:$('roiX'),yInput:$('roiY'),reset:$('resetRoi'),
@@ -10,7 +12,7 @@ function setSession(data) {
   authenticated = !!data.authenticated; csrfToken = data.csrfToken || null;
   $('loginPanel').hidden = authenticated; $('adminPanel').hidden = !authenticated;
   if (!authenticated) {
-    clearTimeout(timer); camera = null; latest = null; $('adminPhoto').removeAttribute('src');
+    clearTimeout(timer); adminTools.stop(); camera = null; latest = null; $('adminPhoto').removeAttribute('src');
     roiEditor.setAvailable(false);
     $('adminStatus').textContent = data.configured === false ? 'El administrador todavía no está configurado en el servidor.' : 'Inicia sesión para cambiar los ajustes.';
   } else $('adminStatus').textContent = 'Solo tu sesión puede guardar cambios. El monitor público sigue disponible.';
@@ -30,7 +32,7 @@ function setBusy(value) {
   busy=value; $('loginButton').disabled=value; $('logoutButton').disabled=value;
   $('reloadSettings').disabled=value; $('cameraRotation').disabled=value;
   $('thresholdPercent').disabled=value; $('thresholdSlider').disabled=value; renderDraft();
-  roiEditor.render();
+  roiEditor.render();adminTools.render();
 }
 function renderDraft() {
   const threshold = Number($('thresholdPercent').value), rotation = Number($('cameraRotation').value);
@@ -53,7 +55,7 @@ function applyConfiguration(data) {
   $('thresholdPercent').value=String(Math.round(camera.threshold*100)); $('thresholdSlider').value=$('thresholdPercent').value;
   $('savedSettings').textContent=`Guardado: ${camera.rotation === 180 ? 'giro de 180°' : 'orientación normal (0°)'} · exigencia ${percent(camera.threshold)} · tamaño de zona ${percent((camera.roi ?? DEFAULT_ROI).size)} del lado corto.`;
   $('adminDecisionPolicy').textContent=`${data.decision.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${data.decision.windowSize} capturas y ${data.decision.confirmationsRequired} evaluaciones seguidas para confirmar.`;
-  renderDraft();
+  renderDraft();adminTools.configuration();adminTools.start();
 }
 async function preview() {
   clearTimeout(timer);

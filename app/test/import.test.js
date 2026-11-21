@@ -20,7 +20,7 @@ test('Importacion PostgreSQL conserva datos, ids y estado; rechaza destinos ocup
     const result = await importHistory(source,target);
     assert.deepEqual(result,{cameras:1,measurements:253,states:1});
     assert.deepEqual(await store(target).readState(),await store(source).readState());
-    assert.deepEqual(await store(target).readCameraSettings(),{rotation:180,version:'0',threshold:null,roi:{centerX:.5,centerY:.5,size:1}});
+    assert.deepEqual(await store(target).readCameraSettings(),{rotation:180,version:'0',threshold:null,paused:false,roi:{centerX:.5,centerY:.5,size:1}});
     assert.deepEqual(await target.query('SELECT * FROM mediciones ORDER BY id'),await source.query('SELECT * FROM mediciones ORDER BY id'));
     await store(target).saveReading({...frame(254),rotation:180,orientationVersion:'0'},config);
     assert.equal((await store(target).readHistory()).entries[0].id,'254');

@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS camaras (
 INSERT INTO camaras (id, nombre) VALUES ('camara-1', 'Camara XIAO 1')
 ON CONFLICT (id) DO NOTHING;
 
+-- La pausa persiste sin borrar mediciones y bloquea tambien escrituras en curso.
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS capturas_pausadas boolean NOT NULL DEFAULT false;
+
 -- La orientacion es compartida por el analisis y todos los monitores.
 -- La version impide guardar una inferencia iniciada antes de cambiar el giro.
 ALTER TABLE camaras

@@ -44,7 +44,7 @@ test('Orientacion inicial de 180 grados: conserva historial y no se reinicia al 
   const db = new PGlite(), execute = executeFor(db), store = createStore(execute);
   try {
     await db.exec(await schema());
-    assert.deepEqual(await store.readCameraSettings(), { rotation:180,version:'0',threshold:null,roi:{centerX:.5,centerY:.5,size:1} });
+    assert.deepEqual(await store.readCameraSettings(), { rotation:180,version:'0',threshold:null,paused:false,roi:{centerX:.5,centerY:.5,size:1} });
     for (let i=1;i<=5;i++) await store.saveReading(frame(i),config);
     const original=(await store.readHistory()).entries;
     assert.equal((await store.readState()).rotation,180);
@@ -52,7 +52,7 @@ test('Orientacion inicial de 180 grados: conserva historial y no se reinicia al 
     await assert.rejects(store.saveReading({...frame(6),rotation:0},config),error=>error.status===409);
     const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
     await migrate(pool);await migrate(pool);
-    assert.deepEqual(await store.readCameraSettings(),{rotation:180,version:'0',threshold:null,roi:{centerX:.5,centerY:.5,size:1}});
+    assert.deepEqual(await store.readCameraSettings(),{rotation:180,version:'0',threshold:null,paused:false,roi:{centerX:.5,centerY:.5,size:1}});
     assert.deepEqual((await store.readHistory()).entries,original);
     const previous=await store.readState();
     await execute('UPDATE estado_camara SET estado=$1::jsonb',[JSON.stringify({...previous,rotation:0})]);
@@ -69,7 +69,7 @@ test('La migracion conserva la orientacion y version elegidas sin forzar el mont
     const pool={connect:async()=>({query:sql=>db.exec(sql),release(){}})};
     await migrate(pool);await migrate(pool);
     assert.equal((await db.query('SELECT nombre FROM camaras')).rows[0].nombre,'Nombre existente');
-    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(),{rotation:0,version:'7',threshold:null,roi:{centerX:.5,centerY:.5,size:1}});
+    assert.deepEqual(await createStore(executeFor(db)).readCameraSettings(),{rotation:0,version:'7',threshold:null,paused:false,roi:{centerX:.5,centerY:.5,size:1}});
     await assert.rejects(db.query("INSERT INTO camaras(id,nombre,rotacion) VALUES('otra','Otra',90)"),error=>error.code==='23514');
   }finally{await db.close();}
 });
