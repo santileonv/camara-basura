@@ -109,7 +109,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     const present = currentTime();
     if (ref.to <= present) return;
     const start = Math.max(ref.from, present), width = ref.x(ref.to) - ref.x(start);
-    ref.svg.append(node('rect', { x:ref.x(start), y:ref.top, width, height:ref.bottom - ref.top, fill:'#edf2f8' }));
+    ref.svg.append(node('rect', { x:ref.x(start), y:ref.top, width, height:ref.bottom - ref.top, fill:'var(--chart-future)' }));
     if (width > 100) ref.svg.append(node('text', { x:ref.x(start) + width / 2, y:ref.top + 19, 'text-anchor':'middle', class:'chartFutureLabel' }, 'Horas futuras'));
   }
   function addSeries(ref, segments, value, color, thick = 2, dashed = false) {
@@ -122,7 +122,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   function shadeThresholds(ref, segments) {
     for (const segment of segments) {
       const first = segment[0], last = segment.at(-1);
-      for (const [edge, value, color] of [[1, row => row.threshold, '#fdf0e8'], [0, row => 1 - row.threshold, '#edf6ef']]) {
+      for (const [edge, value, color] of [[1, row => row.threshold, 'var(--chart-trash-zone)'], [0, row => 1 - row.threshold, 'var(--chart-clear-zone)']]) {
         const boundary = seriesPath([segment], ref.x, ref.y, value, true);
         const d = boundary + `L${ref.x(last.receivedAt).toFixed(1)},${ref.y(edge).toFixed(1)}H${ref.x(first.receivedAt).toFixed(1)}Z`;
         ref.svg.append(node('path', { d, fill:color, stroke:'none' }));
@@ -131,7 +131,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   }
   function mark(ref) {
     ref.marker = node('line', { y1:ref.top, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(ref.marker);
-    ref.dot = node('circle', { r:4, fill:'#b55b36', stroke:'white', 'stroke-width':2 }); ref.svg.append(ref.dot);
+    ref.dot = node('circle', { r:4, fill:'var(--chart-average)', stroke:'var(--surface)', 'stroke-width':2 }); ref.svg.append(ref.dot);
   }
   function selection() {
     const row = entries.find(item => item.id === selectedId) ?? entries.at(-1);
@@ -181,15 +181,15 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   function drawDecision(from, to) {
     const ref = frame('decisionChart', from, to, true);
     const defs = node('defs'), pattern = node('pattern', { id:'noDataPattern', width:8, height:8, patternUnits:'userSpaceOnUse' });
-    pattern.append(node('rect', { width:8, height:8, fill:'#f4f6f2' }), node('path', { d:'M0,8L8,0', stroke:'#dbe4dc', 'stroke-width':1 })); defs.append(pattern); ref.svg.append(defs);
+    pattern.append(node('rect', { width:8, height:8, fill:'var(--chart-nodata)' }), node('path', { d:'M0,8L8,0', stroke:'var(--chart-hatch)', 'stroke-width':1 })); defs.append(pattern); ref.svg.append(defs);
     ref.svg.append(node('rect', { x:ref.left, y:ref.top, width:ref.right - ref.left, height:ref.bottom - ref.top, fill:'url(#noDataPattern)' }));
-    for (const span of spans) ref.svg.append(node('rect', { x:ref.x(span.from), y:ref.top, width:ref.x(span.to) - ref.x(span.from), height:ref.bottom - ref.top, fill:span.conclusion === 'No seguro' ? '#fff1d6' : 'white' }));
+    for (const span of spans) ref.svg.append(node('rect', { x:ref.x(span.from), y:ref.top, width:ref.x(span.to) - ref.x(span.from), height:ref.bottom - ref.top, fill:span.conclusion === 'No seguro' ? 'var(--chart-unsure)' : 'var(--surface)' }));
     shadeFuture(ref);
     grid(ref, true);
     const runs = decisionStepSegments(spans);
     ref.svg.append(node('path', { d:decisionStepPath(runs, ref.x, ref.y), class:'decisionLine', fill:'none' }));
     for (const run of runs) for (const point of [run[0], run.at(-1)])
-      ref.svg.append(node('circle', { cx:ref.x(point.at), cy:ref.y(point.value), r:3.5, fill:point.value ? '#c66742' : '#258263' }));
+      ref.svg.append(node('circle', { cx:ref.x(point.at), cy:ref.y(point.value), r:3.5, fill:point.value ? 'var(--chart-trash)' : 'var(--chart-clear)' }));
     const marker = node('line', { y1:ref.top, y2:ref.bottom, class:'chartCursor' }); ref.svg.append(marker);
     const inspect = stamp => { showDecision(stamp); marker.setAttribute('visibility', 'visible'); marker.setAttribute('x1', ref.x(stamp)); marker.setAttribute('x2', ref.x(stamp)); };
     ref.svg.onpointermove = event => inspect(timestampAt(event, ref)); ref.svg.onpointerdown = ref.svg.onpointermove;
@@ -211,10 +211,10 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     const segments = lineSegments(entries, staleMs);
     probability = frame('detectionChart', from, to);
     shadeThresholds(probability, segments); shadeFuture(probability); grid(probability);
-    addSeries(probability, segments, row => row.threshold, '#c66742', 1.3, true);
-    addSeries(probability, segments, row => 1 - row.threshold, '#258263', 1.3, true);
-    if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
-    addSeries(probability, segments, row => row.trashAverage, '#b55b36', 3);
+    addSeries(probability, segments, row => row.threshold, 'var(--chart-trash)', 1.3, true);
+    addSeries(probability, segments, row => 1 - row.threshold, 'var(--chart-clear)', 1.3, true);
+    if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, 'var(--chart-capture)', 1.2);
+    addSeries(probability, segments, row => row.trashAverage, 'var(--chart-average)', 3);
     mark(probability); interactProbability(probability); selection();
     $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? (realtime ? 'Actualización al recibir mediciones' : 'Actualización automática cada 2 s') : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Cargando este tramo… Las marcas del mapa siguen disponibles.');
     $('chartStatus').classList.toggle('chartFailure', !!error);
