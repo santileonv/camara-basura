@@ -17,7 +17,7 @@ return async function handler(req, res) {
     const jpeg = await body(req, 1000000);
     if (jpeg.length < 4 || jpeg[0] !== 255 || jpeg[1] !== 216) return reply(res, 415, { error: 'JPEG invalido.' });
     const camera = await readCamera();
-    if (camera.rotation !== 180) throw new Error('La camara requiere la orientacion fija de 180 grados.');
+    if (![0, 180].includes(camera.rotation)) throw new Error('Orientacion de camara invalida.');
     const result = await analyze(jpeg, { rotation: camera.rotation });
     const state = await save({ ...result, boot, seq: Number(seqText), receivedAt,
       rotation: camera.rotation, orientationVersion: camera.version }, settings());

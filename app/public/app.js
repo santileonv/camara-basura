@@ -17,6 +17,7 @@ let stream = null, streamConnected = false, queued = false, policyPending = fals
 let policy = {profile:'demo',windowSize:3,minimumReadings:3,confirmationsRequired:2};
 let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false;
 let camera = { rotation: 180, version: '0' }, cameraKnown = false;
+let activeThreshold = .8;
 const percent = value => (100 * value).toFixed(1) + ' %';
 function acceptCamera(next) {
   // Una respuesta atrasada de otra consulta no deshace el cambio recien guardado.
@@ -24,16 +25,16 @@ function acceptCamera(next) {
   camera = next; cameraKnown = true;
 }
 function render() {
-  const pending = last && cameraKnown && ((last.orientationVersion ?? '0') !== camera.version || (last.rotation ?? 0) !== camera.rotation);
+  const pending = last && cameraKnown && (last.rotation ?? 0) !== camera.rotation;
   const fresh = last && !pending && !policyPending && Date.now() - last.receivedAt <= staleMs;
-  $('orientationStatus').textContent = cameraKnown ? 'Orientación fija: girada 180°.' +
+  $('orientationStatus').textContent = cameraKnown ? (camera.rotation === 180 ? 'Orientación: girada 180°.' : 'Orientación: normal (0°).') +
     (pending ? ' Esperando una nueva captura para actualizar el análisis.' : ' El giro se aplica a la imagen y al análisis.') : 'Consultando orientación…';
   $('photo').classList.toggle('upsideDown', !!last && cameraKnown && camera.rotation !== (last.rotation ?? 0));
   const age = last ? Math.max(0, Math.floor((Date.now() - last.receivedAt) / 1000)) : null;
   $('connection').textContent = pending ? 'Esperando captura con la nueva orientación' : (fresh ? 'Cámara enviando mediciones' : (last ? 'Sin mediciones recientes' : 'Esperando la primera captura'));
   $('dot').className = 'dot' + (fresh ? ' online' : '');
   $('age').textContent = age === null ? '—' : 'Última captura hace ' + age + ' s';
-  const conclusion = policyPending ? 'Esperando capturas del nuevo modo' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
+  const conclusion = policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
   const ambiguous = fresh && last.readings >= 3 && last.trashAverage < last.threshold && 1 - last.trashAverage < last.threshold;
@@ -57,7 +58,7 @@ function render() {
   $('averageLabel').textContent = fresh ? `Promedio de basura · ${last.readings} ${last.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de basura de las últimas capturas';
   rows.forEach((row, i) => { row.value.textContent = fresh ? percent(last.scores[i]) : '—'; row.fill.style.width = fresh ? last.scores[i] * 100 + '%' : '0%'; });
   $('window').textContent = pending ? 'El promedio empezará de nuevo con la orientación elegida.' : (fresh ? `Promedio de ${last.readings}/${last.windowSize ?? policy.windowSize} capturas · Confirmación ${last.streak}/${last.confirmationsRequired ?? policy.confirmationsRequired}` : 'La lectura anterior no se presenta como una medición actual.');
-  $('threshold').textContent = last ? `Sobre el promedio: Hay basura ≥ ${percent(last.threshold)} · Sin basura ≤ ${percent(1 - last.threshold)}. Entre ambos: No seguro.` : '';
+  $('threshold').textContent = `Sobre el promedio: Hay basura ≥ ${percent(activeThreshold)} · Sin basura ≤ ${percent(1 - activeThreshold)}. Entre ambos: No seguro.`;
   $('decisionRules').textContent = `${policy.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${policy.windowSize} capturas y ${policy.confirmationsRequired} evaluaciones consecutivas para confirmar.`;
   $('received').textContent = last ? new Date(last.receivedAt).toLocaleString('es-CL') : '—';
   $('analysis').textContent = last ? last.analysisMs + ' ms' : '—';
@@ -72,6 +73,7 @@ async function poll() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo consultar el servidor.');
     acceptCamera(data.camera); last = data.state; staleMs = data.staleMs;
+    activeThreshold = data.camera.threshold ?? last?.threshold ?? .8;
     policy = data.decision ?? {profile:'stable',windowSize:last?.windowSize ?? 5,minimumReadings:3,confirmationsRequired:last?.confirmationsRequired ?? 3};
     policyPending = !!data.policyPending; charts.setPolicy?.(policy);
     if (last?.preview) {

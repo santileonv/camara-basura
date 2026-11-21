@@ -1,0 +1,56 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+
+class Element {
+  constructor(){this.hidden=false;this.disabled=false;this.value='';this.textContent='';this.attributes={};this.listeners={};const names=new Set();this.classList={toggle(n,on){if(on)names.add(n);else names.delete(n);},contains:n=>names.has(n)};}
+  addEventListener(name,fn){this.listeners[name]=fn;}
+  removeAttribute(name){delete this.attributes[name];}
+  getAttribute(name){return this.attributes[name]??null;}
+  dispatch(name){return this.listeners[name]?.({preventDefault(){}});}
+}
+const response=(data,status=200)=>({ok:status<300,status,json:async()=>data});
+test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y cierre de sesion',async()=>{
+  const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
+  get('cameraRotation').value='180';get('thresholdPercent').value=get('thresholdSlider').value='80';
+  let current={rotation:180,threshold:.8,version:'0'},conflict=false,expired=false;const calls=[];
+  const decision={profile:'demo',windowSize:3,confirmationsRequired:2};
+  const fetch=async(path,options={})=>{
+    calls.push({path,...options});
+    if(path==='/api/state')return response({state:{rotation:180,preview:'test-jpeg',receivedAt:Date.now()}});
+    if(path==='/api/admin/session')return response({authenticated:false,configured:true});
+    if(path==='/api/admin/login'){assert.equal(JSON.parse(options.body).password,'test-ui-password');return response({authenticated:true,csrfToken:'c'.repeat(64)});}
+    if(path==='/api/admin/logout')return response({authenticated:false});
+    if(path==='/api/admin/settings'){
+      if(expired)return response({error:'Inicia sesión como administrador.'},401);
+      if(options.method==='PUT'){
+        if(conflict)return response({error:'Los ajustes cambiaron en otra pestaña. Recarga los valores antes de guardar.'},409);
+        const data=JSON.parse(options.body);assert.equal(options.headers['X-CSRF-Token'],'c'.repeat(64));assert.equal(data.expectedVersion,current.version);
+        current={rotation:data.rotation,threshold:data.threshold,version:'1'};
+      }
+      return response({camera:{...current},decision,message:'Ajustes guardados.'});
+    }
+    throw Error('Ruta inesperada: '+path);
+  };
+  const document={hidden:false,getElementById:get,addEventListener(){}};
+  const context=vm.createContext({document,fetch,AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
+  vm.runInContext(await readFile(new URL('../public/admin.js',import.meta.url),'utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(get('loginPanel').hidden,false);assert.equal(get('adminPanel').hidden,true);
+  get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(get('adminPassword').value,'');assert.equal(get('adminPanel').hidden,false);assert.equal(get('saveSettings').disabled,true);
+  get('cameraRotation').value='0';await get('cameraRotation').dispatch('change');
+  get('thresholdSlider').value='90';await get('thresholdSlider').dispatch('input');
+  assert.equal(get('adminPhoto').classList.contains('rotated'),true);assert.equal(get('clearLimit').textContent,'10 %');assert.equal(get('thresholdPercent').value,'90');
+  assert.ok(!calls.some(c=>c.method==='PUT'));assert.equal(get('saveSettings').disabled,false);
+  get('thresholdPercent').value='59';await get('thresholdPercent').dispatch('input');assert.equal(get('saveSettings').disabled,true);
+  get('thresholdPercent').value='90';await get('thresholdPercent').dispatch('input');await get('settingsForm').dispatch('submit');
+  assert.deepEqual(current,{rotation:0,threshold:.9,version:'1'});assert.equal(get('saveSettings').disabled,true);
+  get('thresholdPercent').value='70';await get('thresholdPercent').dispatch('input');conflict=true;await get('settingsForm').dispatch('submit');
+  assert.equal(get('thresholdPercent').value,'70');assert.match(get('adminError').textContent,/otra pestaña/);
+  await get('reloadSettings').dispatch('click');assert.equal(get('thresholdPercent').value,'90');
+  expired=true;await get('reloadSettings').dispatch('click');assert.equal(get('adminPanel').hidden,true);assert.equal(get('loginPanel').hidden,false);
+  expired=false;get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await get('logoutButton').dispatch('click');
+  assert.equal(get('adminPanel').hidden,true);assert.equal(calls.at(-1).path,'/api/admin/logout');
+  assert.equal(calls.at(-1).headers['X-CSRF-Token'],'c'.repeat(64));
+});

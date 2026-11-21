@@ -8,6 +8,8 @@ const FILES = {
   '/charts.js': ['charts.js', 'application/javascript'], '/chart-data.js': ['chart-data.js', 'application/javascript'],
   '/chart-overview.js': ['chart-overview.js', 'application/javascript'],
   '/charts.css': ['charts.css', 'text/css'],
+  '/admin': ['admin.html', 'text/html'], '/admin/': ['admin.html', 'text/html'],
+  '/admin.js': ['admin.js', 'application/javascript'], '/admin.css': ['admin.css', 'text/css'],
   '/style.css': ['style.css', 'text/css'], '/history.css': ['history.css', 'text/css']
 };
 const CSP = "default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";

@@ -18,14 +18,15 @@ ALTER TABLE camaras
   ADD COLUMN IF NOT EXISTS rotacion smallint NOT NULL DEFAULT 180 CHECK (rotacion IN (0, 180)),
   ADD COLUMN IF NOT EXISTS orientacion_version bigint NOT NULL DEFAULT 0 CHECK (orientacion_version >= 0);
 
--- El montaje usa siempre 180 grados. Solo incrementar la version si cambia
--- la orientacion anterior, para que el siguiente analisis reinicie su promedio.
+-- 180 grados es el valor inicial; los ajustes del administrador se conservan.
+-- La misma version protege el giro y el umbral frente a inferencias en curso.
 ALTER TABLE camaras ALTER COLUMN rotacion SET DEFAULT 180;
-UPDATE camaras SET rotacion = 180, orientacion_version = orientacion_version + 1
-WHERE rotacion <> 180;
+ALTER TABLE camaras DROP CONSTRAINT IF EXISTS camaras_rotacion_fija;
+ALTER TABLE camaras ADD COLUMN IF NOT EXISTS umbral_decision double precision
+  CHECK (umbral_decision BETWEEN 0.60 AND 0.95);
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'camaras'::regclass AND conname = 'camaras_rotacion_fija') THEN
-    ALTER TABLE camaras ADD CONSTRAINT camaras_rotacion_fija CHECK (rotacion = 180);
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'camaras'::regclass AND conname = 'camaras_rotacion_valida') THEN
+    ALTER TABLE camaras ADD CONSTRAINT camaras_rotacion_valida CHECK (rotacion IN (0, 180));
   END IF;
 END $$;
 

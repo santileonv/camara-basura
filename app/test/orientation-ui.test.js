@@ -40,7 +40,7 @@ test('El monitor publico muestra la orientacion fija y la confianza, sin control
   vm.runInContext(source,context);await settle();
   assert.equal(get('total').textContent,'95.0 %');assert.equal(get('confidenceBar').hidden,false);
   assert.equal(get('photo').classList.contains('upsideDown'),false);
-  assert.match(get('orientationStatus').textContent,/fija.*180/);
+  assert.match(get('orientationStatus').textContent,/Orientación:.*180/);
   reading={...reading,conclusion:'Sin basura',trashNow:.02,trashAverage:.1,scores:[.98,.01,.005,.005]};
   await vm.runInContext('poll()',context);assert.equal(get('total').textContent,'90.0 %');assert.equal(get('trashAverage').textContent,'10.0 %');
   reading={...reading,conclusion:'No seguro',trashAverage:.238,streak:0};

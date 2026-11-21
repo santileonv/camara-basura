@@ -7,9 +7,11 @@ return async function handler(req, res) {
     if (req.method !== 'GET') return reply(res, 405, { error: 'Usa GET.' });
     const config = settings();
     const { camera, state } = await read();
-    const orientationPending = !!state && ((state.orientationVersion ?? '0') !== camera.version || (state.rotation ?? 0) !== camera.rotation);
+    camera.threshold ??= config.threshold;
+    const orientationPending = !!state && (state.rotation ?? 0) !== camera.rotation;
     const visible = publicState(state, config.staleMs);
-    const policyPending = !!state && (state.decisionProfile ?? 'stable') !== config.decisionProfile;
+    const policyPending = !!state && ((state.decisionProfile ?? 'stable') !== config.decisionProfile || state.threshold !== camera.threshold ||
+      (state.orientationVersion ?? '0') !== camera.version);
     if (orientationPending || policyPending) visible.state.conclusion = 'No seguro';
     reply(res, 200, { labels: LABELS, staleMs: config.staleMs, camera, decision:decisionPolicy(config.decisionProfile),
       policyPending, canManageCamera: false, orientationPending, ...visible });
