@@ -18,6 +18,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   let selectedId = null, probability = null, spans = [], context = null;
   let live = true, viewEnd = null, earliest = null, navigationTimer, loaded = false;
   let selectedDay = localDayKey(Date.now()), fullDay = false, cache = null;
+  let realtime = false, refreshQueued = false, policy = {windowSize:3,confirmationsRequired:2};
   const presetButtons = [...document.querySelectorAll('[data-chart-minutes]')];
   const scrollers = [...document.querySelectorAll('.historyScroller')];
   const positions = new WeakMap();
@@ -124,8 +125,8 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     }
     $('probabilityAverage').textContent = row ? pct(row.trashAverage) : '—';
     $('probabilityCapture').textContent = row ? pct(row.trashNow) : '—';
-    $('averageSamples').textContent = row ? `Promedio de ${row.readings} ${row.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de hasta 5 capturas';
-    $('detectionTooltip').textContent = row ? `${selectedId === null ? 'Última captura del intervalo' : 'Captura seleccionada'}: ${date(row.receivedAt)} · ${row.conclusion} · Confirmación ${row.streak}/3.` : 'No hay mediciones en este intervalo.';
+    $('averageSamples').textContent = row ? `Promedio de ${row.readings} ${row.readings === 1 ? 'captura' : 'capturas'}` : `Promedio de hasta ${policy.windowSize} capturas`;
+    $('detectionTooltip').textContent = row ? `${selectedId === null ? 'Última captura del intervalo' : 'Captura seleccionada'}: ${date(row.receivedAt)} · ${row.conclusion} · Confirmaciones seguidas: ${row.streak}.` : 'No hay mediciones en este intervalo.';
     $('thresholdGuide').textContent = row ? `En esta medición: ≤ ${pct(1 - row.threshold)} apoya «Sin basura»; ≥ ${pct(row.threshold)} apoya «Hay basura». Entre ambos, la evidencia es intermedia.` : 'Los límites punteados muestran los umbrales de decisión.';
   }
   function timestampAt(event, ref) {
@@ -196,7 +197,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     if ($('showCaptures').checked) addSeries(probability, segments, row => row.trashNow, '#8b9eaa', 1.2);
     addSeries(probability, segments, row => row.trashAverage, '#b55b36', 3);
     mark(probability); interactProbability(probability); selection();
-    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? 'Actualización en vivo cada 15 s' : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Consultando mediciones…');
+    $('chartStatus').textContent = error || (lastUpdated ? `${entries.length} mediciones · ${live ? (realtime ? 'Actualización al recibir mediciones' : 'Actualización automática cada 2 s') : 'Historial cargado'}.` + (limited ? ' Hay más de 6000 mediciones en este intervalo: acerca el zoom para ver todas las del tramo.' : '') : 'Consultando mediciones…');
     $('chartStatus').classList.toggle('chartFailure', !!error);
     $('chartEmpty').textContent = from >= currentTime() ? 'Este tramo de hoy aún no ocurre. Desplaza la barra hacia una hora anterior o vuelve al vivo.' : 'No hay mediciones en este tramo. Prueba otra hora, otro intervalo o una fecha distinta.';
     $('chartEmpty').hidden = entries.length > 0 || !lastUpdated || !!error;
@@ -227,7 +228,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     // Las horas futuras se muestran vacias y no se envian como fechas futuras a la API.
     if (view.from >= queryTo) {
       entries = []; context = null; loaded = true; lastUpdated = currentTime(); error = ''; render();
-      if (live) timer = setTimeout(refresh, 15000); return;
+      if (live && !realtime) timer = setTimeout(refresh, 2000); return;
     }
     // Reusar un dia ya consultado permite desplazarse y acercar sin repetir consultas.
     if (!live && cache && view.from >= cache.from && queryTo <= cache.to) { applyData(cache, true); return; }
@@ -250,14 +251,20 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
       error = 'No se pudieron actualizar los gráficos. ' + (entries.length ? 'Se conservan los datos anteriores.' : 'Pulsa Actualizar gráficos para reintentar.'); render();
     } finally {
       clearTimeout(timeout);
-      if (request === controller) { request = null; if (active && live && !document.hidden) timer = setTimeout(refresh, 15000); }
+      if (request === controller) {
+        request = null;
+        if (active && live && !document.hidden) {
+          if (refreshQueued) { refreshQueued = false; timer = setTimeout(refresh, 0); }
+          else if (!realtime) timer = setTimeout(refresh, 2000);
+        }
+      }
     }
   }
 
   function navigate(to, nextDuration = duration, immediate = false) {
     clearTimeout(timer); clearTimeout(navigationTimer);
     const old = request; request = null; old?.abort();
-    duration = nextDuration; live = false; viewEnd = to;
+    duration = nextDuration; live = false; viewEnd = to; refreshQueued = false;
     entries = []; context = null; selectedId = null; cursor = null; lastUpdated = null; loaded = false; limited = false; error = '';
     render();
     if (immediate) refresh(true); else navigationTimer = setTimeout(() => refresh(true), 180);
@@ -322,9 +329,22 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe($('chartSections'));
   else window.addEventListener('resize', resize);
   return {
+    setPolicy(next) {
+      policy = next;
+      $('chartWindowDescription').textContent = `La línea gruesa muestra Botellas + Papeles y Cartones + Bolsas. Configuración actual: promedio de hasta ${next.windowSize} capturas. Cada registro anterior conserva su promedio original.`;
+      $('chartDecisionHelp').textContent = `Configuración actual: ${next.confirmationsRequired} evaluaciones consecutivas para confirmar. El porcentaje no representa cantidad ni volumen de residuos.`;
+    },
+    setRealtime(connected) {
+      realtime = connected; clearTimeout(timer);
+      if (!connected && active && live && !document.hidden && !request) timer = setTimeout(refresh, 2000);
+    },
+    notify() {
+      if (!active || !live || document.hidden) return;
+      if (request) refreshQueued = true; else refresh();
+    },
     start() { if (!active) { active = true; live = true; viewEnd = null; refresh(true); } },
     stop() {
-      active = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
+      active = false; refreshQueued = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
       const old = request; request = null; old?.abort();
       entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false; cache = null;
       for (const id of ['detectionChart', 'decisionChart']) $(id).replaceChildren();

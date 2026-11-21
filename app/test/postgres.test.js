@@ -76,5 +76,10 @@ test('PostgreSQL real en WASM: esquema, concurrencia, historial, transaccion y A
     assert.equal(result.status, 200);assert.equal(result.body.entries.length, 2);
     assert.equal((await request('/api/history?before=invalido', cookie)).status, 400);
     assert.equal((await request('/api/history?limit=251', cookie)).status, 400);
+    const oldCount=await count();
+    for(let seq=2;seq<=5;seq++) await store.saveReading(frame(seq,{boot:'ffffffffffffffff',receivedAt:1700001000000+seq*5000}),{...config,decisionProfile:'demo'});
+    assert.equal(await count(),oldCount+4); // El cambio de perfil no borra ninguna medicion anterior.
+    const demoState=await store.readState();assert.equal(demoState.history.length,3);assert.equal(demoState.streak,2);
+    assert.equal(demoState.conclusion,'Hay basura');assert.equal(demoState.decisionProfile,'demo');
   } finally { await db.close(); }
 });

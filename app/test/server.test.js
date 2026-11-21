@@ -47,7 +47,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
       assert.equal(result.status,200,await result.text());
     }
     const state=await(await request('/api/state',{headers:{cookie}})).json();
-    assert.equal(state.canManageCamera,false);assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,5);
+    assert.equal(state.canManageCamera,false);assert.equal(state.online,true);assert.equal(state.state.scores.length,4);assert.equal(state.state.readings,3);
+    assert.equal(state.state.decisionProfile,'demo');assert.equal(state.decision.confirmationsRequired,2);
     const publicState=await(await request('/api/state')).json();assert.equal(publicState.canManageCamera,false);assert.equal(publicState.state.scores.length,4);
     const history=await(await request('/api/history?limit=2')).json();
     assert.equal(history.entries.length,2);assert.ok(history.nextCursor);

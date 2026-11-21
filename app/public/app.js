@@ -13,6 +13,8 @@ const rows = labels.map(label => {
   return { value, fill };
 });
 let timer, busy = false, last = null, staleMs = 90000;
+let stream = null, streamConnected = false, queued = false, policyPending = false;
+let policy = {profile:'demo',windowSize:3,minimumReadings:3,confirmationsRequired:2};
 let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false;
 let camera = { rotation: 180, version: '0' }, cameraKnown = false;
 const percent = value => (100 * value).toFixed(1) + ' %';
@@ -23,7 +25,7 @@ function acceptCamera(next) {
 }
 function render() {
   const pending = last && cameraKnown && ((last.orientationVersion ?? '0') !== camera.version || (last.rotation ?? 0) !== camera.rotation);
-  const fresh = last && !pending && Date.now() - last.receivedAt <= staleMs;
+  const fresh = last && !pending && !policyPending && Date.now() - last.receivedAt <= staleMs;
   $('orientationStatus').textContent = cameraKnown ? 'Orientación fija: girada 180°.' +
     (pending ? ' Esperando una nueva captura para actualizar el análisis.' : ' El giro se aplica a la imagen y al análisis.') : 'Consultando orientación…';
   $('photo').classList.toggle('upsideDown', !!last && cameraKnown && camera.rotation !== (last.rotation ?? 0));
@@ -31,13 +33,13 @@ function render() {
   $('connection').textContent = pending ? 'Esperando captura con la nueva orientación' : (fresh ? 'Cámara enviando mediciones' : (last ? 'Sin mediciones recientes' : 'Esperando la primera captura'));
   $('dot').className = 'dot' + (fresh ? ' online' : '');
   $('age').textContent = age === null ? '—' : 'Última captura hace ' + age + ' s';
-  const conclusion = pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
+  const conclusion = policyPending ? 'Esperando capturas del nuevo modo' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
   const ambiguous = fresh && last.readings >= 3 && last.trashAverage < last.threshold && 1 - last.trashAverage < last.threshold;
-  $('detail').textContent = pending ? 'El giro está guardado. La conclusión se actualizará con las próximas capturas.' : (fresh ?
+  $('detail').textContent = policyPending ? 'La próxima captura inicia el promedio con la configuración nueva.' : pending ? 'El giro está guardado. La conclusión se actualizará con las próximas capturas.' : (fresh ?
     (ambiguous ? 'La evidencia es ambigua: el promedio de basura está entre los dos umbrales de decisión.' :
-      (last.streak >= 3 ? 'Resultado confirmado con tres evaluaciones consecutivas.' : 'Reuniendo capturas y confirmaciones para una decisión estable.')) :
+      (last.streak >= policy.confirmationsRequired ? `Resultado confirmado con ${policy.confirmationsRequired} evaluaciones consecutivas.` : 'Reuniendo capturas y confirmaciones para una decisión estable.')) :
     'Revisa que la XIAO tenga alimentación, Wi-Fi e Internet.');
   // La barra expresa confianza en la conclusion mostrada. La suma de basura
   // se mantiene separada: para "Sin basura" usamos su complemento.
@@ -54,20 +56,24 @@ function render() {
   $('trashAverage').textContent = fresh ? percent(last.trashAverage) : '—';
   $('averageLabel').textContent = fresh ? `Promedio de basura · ${last.readings} ${last.readings === 1 ? 'captura' : 'capturas'}` : 'Promedio de basura de las últimas capturas';
   rows.forEach((row, i) => { row.value.textContent = fresh ? percent(last.scores[i]) : '—'; row.fill.style.width = fresh ? last.scores[i] * 100 + '%' : '0%'; });
-  $('window').textContent = pending ? 'El promedio empezará de nuevo con la orientación elegida.' : (fresh ? `Promedio de ${last.readings}/5 capturas · Confirmación ${last.streak}/3` : 'La lectura anterior no se presenta como una medición actual.');
+  $('window').textContent = pending ? 'El promedio empezará de nuevo con la orientación elegida.' : (fresh ? `Promedio de ${last.readings}/${last.windowSize ?? policy.windowSize} capturas · Confirmación ${last.streak}/${last.confirmationsRequired ?? policy.confirmationsRequired}` : 'La lectura anterior no se presenta como una medición actual.');
   $('threshold').textContent = last ? `Sobre el promedio: Hay basura ≥ ${percent(last.threshold)} · Sin basura ≤ ${percent(1 - last.threshold)}. Entre ambos: No seguro.` : '';
+  $('decisionRules').textContent = `${policy.profile === 'demo' ? 'Modo demo' : 'Modo estable'}: promedio de hasta ${policy.windowSize} capturas y ${policy.confirmationsRequired} evaluaciones consecutivas para confirmar.`;
   $('received').textContent = last ? new Date(last.receivedAt).toLocaleString('es-CL') : '—';
   $('analysis').textContent = last ? last.analysisMs + ' ms' : '—';
 }
 async function poll() {
   clearTimeout(timer);
-  if (busy || document.hidden) return;
+  if (document.hidden) return;
+  if (busy) { queued = true; return; }
   busy = true;
   try {
     const response = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo consultar el servidor.');
     acceptCamera(data.camera); last = data.state; staleMs = data.staleMs;
+    policy = data.decision ?? {profile:'stable',windowSize:last?.windowSize ?? 5,minimumReadings:3,confirmationsRequired:last?.confirmationsRequired ?? 3};
+    policyPending = !!data.policyPending; charts.setPolicy?.(policy);
     if (last?.preview) {
       const source = 'data:image/jpeg;base64,' + last.preview;
       if ($('photo').getAttribute('src') !== source) $('photo').src = source;
@@ -79,7 +85,10 @@ async function poll() {
     last = null; render(); $('notice').textContent = error.message || 'No se pudo conectar. Intenta nuevamente.';
   } finally {
     busy = false;
-    if (!document.hidden) timer = setTimeout(poll, 15000);
+    if (!document.hidden) {
+      if (queued) { queued = false; timer = setTimeout(poll, 0); }
+      else if (!streamConnected) timer = setTimeout(poll, 2000);
+    }
   }
 }
 async function loadHistory(reset = false) {
@@ -113,7 +122,32 @@ async function loadHistory(reset = false) {
 }
 $('refreshHistory').onclick = () => loadHistory(true);
 $('moreHistory').onclick = () => loadHistory(false);
-document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) poll(); });
+function disconnectStream() {
+  const old = stream; stream = null; old?.close(); streamConnected = false;
+  charts.setRealtime?.(false);
+}
+function connectStream() {
+  if (document.hidden || stream || typeof EventSource === 'undefined') return;
+  const events = new EventSource('/api/events'); stream = events;
+  const update = () => {
+    if (stream !== events || document.hidden) return;
+    streamConnected = true; clearTimeout(timer); charts.setRealtime?.(true);
+    poll(); charts.notify?.();
+  };
+  events.addEventListener('ready', update);
+  events.addEventListener('measurement', update);
+  events.onerror = () => {
+    if (stream !== events) return;
+    streamConnected = false; charts.setRealtime?.(false);
+    // EventSource reintenta solo; mientras tanto se consultan datos cada 2 s.
+    if (!document.hidden) poll();
+  };
+}
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(timer);
+  if (document.hidden) disconnectStream(); else { connectStream(); poll(); }
+});
 setInterval(() => { if (!document.hidden) render(); }, 1000);
 charts.start();
+connectStream();
 poll();

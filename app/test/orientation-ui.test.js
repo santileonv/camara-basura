@@ -54,3 +54,38 @@ test('El monitor publico muestra la orientacion fija y la confianza, sin control
   assert.ok(requests.every(request=>request.method==='GET'));
   assert.ok(!requests.some(request=>/camera-settings|login|logout/.test(request.url)));
 });
+
+test('Avisos en vivo: refrescan al guardar, reconcilian un aviso durante una consulta y usan respaldo al desconectarse',async()=>{
+  const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
+  const listeners={},timers=new Map();let timerId=0,stateRequests=0,release;
+  const document={getElementById:get,createElement:()=>new Element(),hidden:false,addEventListener(name,fn){listeners[name]=fn;}};
+  const chartCalls=[];const charts={start(){},setPolicy(p){chartCalls.push(['policy',p.windowSize,p.confirmationsRequired]);},setRealtime(v){chartCalls.push(['live',v]);},notify(){chartCalls.push(['notify']);}};
+  class Events {
+    static instances=[];
+    constructor(url){this.url=url;this.handlers={};Events.instances.push(this);}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    close(){this.closed=true;}
+    emit(name){this.handlers[name]?.();}
+  }
+  const reading={receivedAt:Date.now(),rotation:180,orientationVersion:'0',scores:[.05,.45,.4,.1],preview:'jpeg',conclusion:'Hay basura',trashNow:.95,trashAverage:.95,readings:3,streak:2,windowSize:3,confirmationsRequired:2,threshold:.8,analysisMs:50};
+  const state=()=>response({camera:{rotation:180,version:'0'},state:reading,staleMs:90000,decision:{profile:'demo',windowSize:3,confirmationsRequired:2}});
+  const fetch=async url=>{
+    if(url==='/api/state'){stateRequests++;if(stateRequests===1)return new Promise(resolve=>{release=()=>resolve(state());});return state();}
+    return response({entries:[],nextCursor:null});
+  };
+  const context=vm.createContext({document,fetch,EventSource:Events,AbortSignal,URLSearchParams,createCharts:()=>charts,
+    setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),setInterval(){}});
+  const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  vm.runInContext(source,context);assert.equal(stateRequests,1);
+  const events=Events.instances[0];assert.equal(events.url,'/api/events');events.emit('ready');
+  assert.equal(stateRequests,1);release();await settle();
+  const queued=[...timers].find(([,t])=>t.ms===0);assert.ok(queued);timers.delete(queued[0]);queued[1].fn();await settle();
+  assert.equal(stateRequests,2);assert.ok(![...timers.values()].some(t=>t.ms===2000));
+  assert.match(get('window').textContent,/3\/3.*2\/2/);assert.match(get('decisionRules').textContent,/3 capturas.*2 evaluaciones/);
+  events.emit('measurement');await settle();assert.equal(stateRequests,3);
+  events.onerror();await settle();assert.ok([...timers.values()].some(t=>t.ms===2000));
+  assert.ok(chartCalls.some(c=>c[0]==='notify'));assert.ok(chartCalls.some(c=>c[0]==='live'&&c[1]===false));
+  document.hidden=true;listeners.visibilitychange();assert.equal(events.closed,true);assert.equal(timers.size,0);
+  const before=stateRequests;events.emit('measurement');await settle();assert.equal(stateRequests,before);
+  document.hidden=false;listeners.visibilitychange();await settle();assert.equal(Events.instances.length,2);
+});
