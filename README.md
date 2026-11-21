@@ -4,7 +4,7 @@ Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor es público y se puede abrir desde cualquier red, sin clave de consulta. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; estos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas web JSON y CSV se retiraron al hacer público el monitor. No requiere volver a cargar el firmware.
+La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; estos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas públicas siguen retiradas. Solo el administrador puede exportar JSON/CSV y pausar o reanudar. Los ajustes de giro, zona y exigencia no requieren cargar firmware; detener también las capturas físicas requiere el firmware de control descrito más abajo.
 
 **Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
@@ -35,9 +35,9 @@ Los gráficos SVG, el mapa del día, el calendario, las tablas, los estados y lo
 
 ## Consulta pública y administración
 
-La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los dos gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; retirar las descargas no vuelve privados los datos visibles.
+La página principal muestra la cámara, la conclusión, los porcentajes, el historial y los dos gráficos sin pedir contraseña. Las rutas de consulta son públicas y de solo lectura. La información que se muestra puede copiarse desde el navegador; proteger las descargas de administración no vuelve privados los datos visibles.
 
-No hay botones de descarga JSON ni CSV. `GET /api/export.json` ya no está registrado en el servidor y el antiguo handler responde 404 incluso con una sesión anterior. Los respaldos y exportaciones del propietario se realizan directamente en Aiven o con una herramienta PostgreSQL, fuera del monitor público.
+El monitor público no tiene botones de descarga. `GET /api/export.json` y `/api/export.csv` siguen sin estar registrados. Las nuevas descargas solo se ofrecen en `/admin` y `/api/admin/export` exige una sesión administrativa vigente; la cookie antigua y el token de cámara no permiten exportar.
 
 ## Administración protegida y ajustes persistentes
 
@@ -49,7 +49,7 @@ El umbral es simétrico: con 80 %, el promedio de Botellas + Papeles y Cartones 
 
 `camaras.rotacion` conserva el giro, `umbral_decision` guarda el umbral y `zona_analisis` guarda el recuadro y `orientacion_version` versiona todos los ajustes. `THRESHOLD` es únicamente el valor inicial si no hay umbral guardado. Los despliegues siguientes conservan los valores elegidos y eliminan la antigua restricción que fijaba el giro. Cambiar un ajuste incrementa la versión y la siguiente captura reinicia el promedio y sus confirmaciones. No se reescriben mediciones anteriores. Una inferencia iniciada con ajustes antiguos se rechaza con 409 si intenta guardarse después de un cambio. Guardar los mismos valores no incrementa la versión ni reinicia el promedio.
 
-Las rutas `/api/admin/session`, `/api/admin/login`, `/api/admin/logout` y `/api/admin/settings` gestionan el acceso. Solo una sesión nueva creada con la contraseña puede consultar o modificar los ajustes. Las cookies de consulta antiguas y el token de la cámara no conceden permisos administrativos. El antiguo `/api/camera-settings` sigue retirado (410). Las rutas de consulta y el monitor siguen públicos; no se reintroducen las descargas de la base.
+Las rutas `/api/admin/session`, `/api/admin/login`, `/api/admin/logout` y `/api/admin/settings` gestionan el acceso. Solo una sesión nueva creada con la contraseña puede consultar o modificar los ajustes. Las cookies de consulta antiguas y el token de la cámara no conceden permisos administrativos. El antiguo `/api/camera-settings` sigue retirado (410). Las rutas de consulta y el monitor siguen públicos; los controles y las exportaciones nuevos exigen la sesión de administrador.
 
 Las sesiones duran hasta 8 horas, usan tokens aleatorios de 256 bits y se conservan por hash en memoria de la única réplica del servicio. Reiniciar o desplegar cierra las sesiones, pero conserva los ajustes de PostgreSQL. Cerrar sesión revoca el token inmediatamente y cambiar las credenciales invalida las sesiones anteriores. En producción la cookie `__Host-xiao_admin` tiene `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` y no tiene Domain. Cada escritura requiere además un token CSRF y un Origin exactamente coincidente; no se habilita CORS. Tras cinco contraseñas incorrectas se bloquea el origen de conexión durante 15 minutos. La aplicación no confía en X-Forwarded-For recibido: detrás de un proxy varios clientes pueden compartir ese límite. El contenido JSON se limita a 4 KB y se comprueban giro, zona, umbral y versión en el servidor y la base.
 
@@ -173,6 +173,14 @@ Si el cambio a Aiven falla antes de aceptar capturas nuevas, vuelve a pausar la 
 
 Si no existe historial y quieres empezar vacío, omite la copia y configura directamente Aiven como `DATABASE_URL`, con su CA y TLS obligatorio. El servidor creará las tablas al arrancar. Esa opción no traslada registros anteriores.
 
+## Pausar y continuar desde administración
+
+En `/admin`, el botón **Pausar capturas y análisis** guarda la orden en `camaras.capturas_pausadas`. Es persistente: reiniciar Railway o volver a desplegar no reanuda la cámara. Solo el administrador autenticado puede cambiarla mediante `PUT /api/admin/operations`, protegido por origen, CSRF y versión de configuración. No borra mediciones. Una foto que ya estaba en análisis no puede guardarse después de la pausa; la versión se verifica otra vez en la escritura SQL. Al reanudar, la siguiente captura inicia una ventana de decisión nueva.
+
+**Actualizar una vez la XIAO:** copia `XIAO_Remota.ino`, `capture-schedule.h` y `certificados.h` desde `firmware/XIAO_Remota`, conserva tu `config.h` privado y vuelve a cargar la placa. El firmware consulta `/api/device/control` por HTTPS con `CAMERA_TOKEN` antes de capturar al arrancar. En marcha recibe la orden junto a la respuesta del envío; puede haber una foto ya en tránsito, que el servidor descarta sin analizar. Al pausar desinicializa el controlador de cámara, no pide más cuadros ni envía imágenes, y consulta la orden cada 3 segundos. Al continuar inicializa de nuevo la cámara y retoma la cadencia de demo. No almacena fotos atrasadas. Ante un error de control espera sin capturar hasta recibir una orden válida. La interfaz muestra si la placa confirmó la orden o todavía necesita el firmware nuevo.
+
+Con firmware anterior la pausa del **servidor** funciona: las fotos recibidas no se analizan ni guardan. La toma y el envío físicos solo se detienen con el firmware actualizado. La variable de mantenimiento `INGEST_PAUSED=true`, si estuviera configurada, prevalece y debe retirarse en Railway para reanudar. No se añadió video en vivo.
+
 ## 4. Administrar la base y descargar los datos
 
 En Aiven abre tu servicio PostgreSQL y **PG Studio**. Ahí puedes consultar las tablas y ejecutar SQL. Para este proyecto:
@@ -183,7 +191,14 @@ SELECT * FROM public.mediciones ORDER BY id DESC LIMIT 100;
 SELECT pg_size_pretty(pg_database_size(current_database())) AS tamano_base;
 ```
 
-PG Studio permite exportar resultados de consulta. La obtención de archivos JSON, CSV o respaldos completos corresponde a las herramientas privadas de administración de PostgreSQL; las descargas se retiraron del monitor público.
+Desde `/admin` → **Exportar datos** puedes descargar:
+
+- **Base en JSON:** contenido de las tres tablas del proyecto (`camaras`, `estado_camara`, `mediciones`), metadatos de formato y fecha. Conserva IDs y secuencias BIGINT como texto y los timestamps de mediciones con precisión de microsegundos. No incluye contraseñas ni variables de Railway. No es un `pg_dump`: no contiene definiciones SQL, roles ni permisos.
+- **Mediciones en CSV:** todas las columnas numéricas, identidad y fecha de cada medición; incluye cabecera y BOM UTF-8 para hojas de cálculo.
+
+Puedes elegir todo el historial o fechas inclusivas de inicio y término, en la zona horaria del navegador. El filtro afecta las mediciones; el JSON mantiene la configuración y el estado actuales de las cámaras. La descarga usa una instantánea PostgreSQL de solo lectura y lotes de 500 filas, sin cargar el historial completo en memoria. Solo se permite una exportación simultánea por instancia, con límite de dos minutos; ante un volumen mayor, elige menos días. Cerrar sesión corta una descarga todavía en curso. Cancelarla cierra la transacción y libera la conexión. No necesita pausar el análisis.
+
+Para un respaldo PostgreSQL completo con esquema y permisos, usa `pg_dump` de forma privada. PG Studio de Aiven también permite exportar resultados de consultas.
 
 Se guardan resultados numéricos de cada captura aceptada y solo la última miniatura en `estado_camara`. Los registros numéricos no pueden recuperar fotos históricas que nunca se almacenaron.
 
@@ -233,7 +248,10 @@ Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**.
 | Archivo o variable | Función |
 |---|---|
 | `lib/raw-export.js` | Lee todas las mediciones por lotes en una instantánea de solo lectura |
-| `api/export.js` | Handler retirado; responde 404 y no lee la base |
+| `api/export.js` | Handler público retirado; responde 404 y no lee la base |
+| `api/admin-export.js` / `lib/database-export.js` | Exportación JSON/CSV privada y por lotes |
+| `api/operations.js` / `lib/device-status.js` | Pausa persistente y confirmación de la placa |
+| `public/admin-tools.js` | Controles de operación y exportación del administrador |
 | `api/camera-settings.js` | Ruta pública de ajuste retirada; devuelve 410. Los cambios se hacen por /api/admin/settings |
 | `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
 | `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
@@ -261,7 +279,7 @@ npm run dev
 
 Abre `http://localhost:3000`. Para producción mantén `NODE_ENV=production` y HTTPS. El monitor público no necesita cookies ni clave de consulta.
 
-Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, orientación fija, ajuste y exportación web retirados, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
+Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, orientación fija, rutas públicas de modificación y exportación retiradas, pausa y reanudación privadas, carreras de pausa durante el análisis y el commit, exportación privada por lotes con BIGINT y filtros de fechas, revocación de descargas, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
 
 El paquete no incluye `node_modules`. Docker instala solo dependencias de producción con `npm ci`. No se ha compilado el sketch ni probado una cámara física desde este entorno.
 

@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {DEFAULT_ROI,sameRoi} from '../public/roi-geometry.js';
 import {createRoiEditor} from '../public/roi-editor.js';
+import {createAdminTools} from '../public/admin-tools.js';
 
 class Element {
   constructor(){this.hidden=false;this.disabled=false;this.value='';this.textContent='';this.attributes={};this.listeners={};this.style={};const names=new Set();this.classList={toggle(n,on){if(on)names.add(n);else names.delete(n);},contains:n=>names.has(n)};}
@@ -16,13 +17,17 @@ class Element {
   dispatch(name){return this.listeners[name]?.({preventDefault(){}});}
 }
 const response=(data,status=200)=>({ok:status<300,status,json:async()=>data});
-test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y cierre de sesion',async()=>{
+test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y cierre de sesion',async(t)=>{
   const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   get('cameraRotation').value='180';get('thresholdPercent').value=get('thresholdSlider').value='80';
   let current={rotation:180,threshold:.8,version:'0',roi:{...DEFAULT_ROI}},conflict=false,expired=false;const calls=[];
   const decision={profile:'demo',windowSize:3,confirmationsRequired:2};
   const fetch=async(path,options={})=>{
     calls.push({path,...options});
+    if(path==='/api/admin/operations'){
+      if(options.method==='PUT'){const data=JSON.parse(options.body);assert.equal(options.headers['X-CSRF-Token'],'c'.repeat(64));assert.equal(data.expectedVersion,current.version);current={...current,paused:data.paused,version:String(BigInt(current.version)+1n)};}
+      return response({camera:{...current},device:null});
+    }
     if(path==='/api/state')return response({state:{rotation:180,preview:'test-jpeg',receivedAt:Date.now()}});
     if(path==='/api/admin/session')return response({authenticated:false,configured:true});
     if(path==='/api/admin/login'){assert.equal(JSON.parse(options.body).password,'test-ui-password');return response({authenticated:true,csrfToken:'c'.repeat(64)});}
@@ -39,7 +44,7 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
     throw Error('Ruta inesperada: '+path);
   };
   const document={hidden:false,getElementById:get,addEventListener(){}};
-  const context=vm.createContext({document,fetch,DEFAULT_ROI,sameRoi,createRoiEditor,AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
+  const context=vm.createContext({document,fetch,DEFAULT_ROI,sameRoi,createRoiEditor,createAdminTools:options=>{const tools=createAdminTools(options);t.after(()=>tools.stop());return tools;},AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
   vm.runInContext((await readFile(new URL('../public/admin.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,''),context);
   await new Promise(resolve=>setImmediate(resolve));assert.equal(get('loginPanel').hidden,false);assert.equal(get('adminPanel').hidden,true);
   get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await new Promise(resolve=>setImmediate(resolve));
@@ -53,11 +58,18 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
   assert.deepEqual(current,{rotation:0,threshold:.9,version:'1',roi:{...DEFAULT_ROI}});assert.equal(get('saveSettings').disabled,true);
   get('roiSize').value='60';await get('roiSize').dispatch('input');assert.equal(get('saveSettings').disabled,false);assert.equal(current.roi.size,1);
   await get('settingsForm').dispatch('submit');assert.equal(current.roi.size,.6);assert.equal(current.version,'2');assert.equal(get('saveSettings').disabled,true);
-  get('thresholdPercent').value='70';await get('thresholdPercent').dispatch('input');conflict=true;await get('settingsForm').dispatch('submit');
+  get('thresholdPercent').value='70';await get('thresholdPercent').dispatch('input');
+  await get('pauseCaptures').dispatch('click');assert.equal(current.paused,true);assert.equal(get('pauseCaptures').textContent,'Reanudar capturas y análisis');assert.equal(get('thresholdPercent').value,'70');assert.equal(get('saveSettings').disabled,false);
+  assert.equal(get('exportDatabaseJSON').getAttribute('href'),'/api/admin/export?format=json');
+  get('exportScope').value='dates';await get('exportScope').dispatch('change');assert.equal(get('exportDatabaseJSON').getAttribute('href'),null);
+  get('exportFrom').value='2026-01-01';get('exportTo').value='2026-01-02';await get('exportTo').dispatch('change');
+  const download=new URL(get('exportMeasurementsCSV').getAttribute('href'),'http://test');assert.equal(download.searchParams.get('format'),'csv');assert.equal(Number(download.searchParams.get('from')),new Date('2026-01-01T00:00:00').getTime());assert.equal(Number(download.searchParams.get('to')),new Date('2026-01-03T00:00:00').getTime());
+  get('exportFrom').value='2026-01-03';await get('exportFrom').dispatch('change');assert.equal(get('exportMeasurementsCSV').getAttribute('href'),null);
+  conflict=true;await get('settingsForm').dispatch('submit');
   assert.equal(get('thresholdPercent').value,'70');assert.match(get('adminError').textContent,/otra pestaña/);
   await get('reloadSettings').dispatch('click');assert.equal(get('thresholdPercent').value,'90');
   expired=true;await get('reloadSettings').dispatch('click');assert.equal(get('adminPanel').hidden,true);assert.equal(get('loginPanel').hidden,false);
   expired=false;get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await get('logoutButton').dispatch('click');
-  assert.equal(get('adminPanel').hidden,true);assert.equal(calls.at(-1).path,'/api/admin/logout');
+  assert.equal(get('adminPanel').hidden,true);assert.equal(get('exportDatabaseJSON').getAttribute('href'),null);assert.equal(get('pauseCaptures').disabled,true);assert.equal(calls.at(-1).path,'/api/admin/logout');
   assert.equal(calls.at(-1).headers['X-CSRF-Token'],'c'.repeat(64));
 });

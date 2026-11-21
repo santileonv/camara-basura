@@ -8,7 +8,7 @@ const CAMERA_ID = 'camara-1';
 const SAVE = `
 WITH configuracion_actual AS MATERIALIZED (
   SELECT id FROM camaras
-  WHERE id = $1 AND orientacion_version = $4::bigint AND rotacion = $5::smallint
+  WHERE id = $1 AND orientacion_version = $4::bigint AND rotacion = $5::smallint AND NOT capturas_pausadas
   FOR UPDATE
 ), actualizado AS (
   INSERT INTO estado_camara (camara_id, revision, estado)
@@ -39,14 +39,14 @@ SELECT estado FROM actualizado CROSS JOIN registrado`;
 
 // La misma implementacion funciona con pg en Railway y PostgreSQL local (PGlite).
 export function createStore(execute) {
-  const cameraColumns = 'rotacion AS rotation, orientacion_version::text AS version, umbral_decision AS threshold, zona_analisis AS roi';
+  const cameraColumns = 'rotacion AS rotation, orientacion_version::text AS version, umbral_decision AS threshold, zona_analisis AS roi, capturas_pausadas AS paused';
   async function readCameraSettings() {
     const rows = await execute('SELECT ' + cameraColumns + ' FROM camaras WHERE id = $1', [CAMERA_ID]);
     if (!rows.length) throw new Error('Camara no configurada.');
     return rows[0];
   }
   async function readCameraView() {
-    const rows = await execute(`SELECT c.rotacion AS rotation, c.orientacion_version::text AS version, c.umbral_decision AS threshold, c.zona_analisis AS roi, e.estado
+    const rows = await execute(`SELECT c.rotacion AS rotation, c.orientacion_version::text AS version, c.umbral_decision AS threshold, c.zona_analisis AS roi, c.capturas_pausadas AS paused, e.estado
       FROM camaras c LEFT JOIN estado_camara e ON e.camara_id = c.id WHERE c.id = $1`, [CAMERA_ID]);
     if (!rows.length) throw new Error('Camara no configurada.');
     const { estado, ...camera } = rows[0]; return { camera, state: estado };
@@ -79,10 +79,20 @@ export function createStore(execute) {
     return rows[0] || { revision: '0', estado: null };
   }
   async function readState() { return (await readVersionedState()).estado; }
+  async function setCapturePaused({paused,expectedVersion}) {
+    if(typeof paused!=='boolean' || typeof expectedVersion!=='string' || !/^(0|[1-9]\d{0,18})$/.test(expectedVersion) || BigInt(expectedVersion)>=9223372036854775807n)
+      throw Object.assign(new Error('Pausa o versión inválida.'),{status:400});
+    const rows=await execute(`UPDATE camaras SET capturas_pausadas=$2,
+      orientacion_version=orientacion_version+CASE WHEN capturas_pausadas<>$2 THEN 1 ELSE 0 END
+      WHERE id=$1 AND orientacion_version=$3::bigint RETURNING `+cameraColumns,[CAMERA_ID,paused,expectedVersion]);
+    if(!rows.length)throw Object.assign(new Error('Los ajustes cambiaron. Recarga los valores antes de continuar.'),{status:409});
+    return rows[0];
+  }
   async function saveReading(reading, config) {
     reading = { ...reading, rotation:reading.rotation ?? 180,orientationVersion:reading.orientationVersion ?? '0',roi:reading.roi ?? DEFAULT_ROI };
     for (let attempt = 0; attempt < 5; attempt++) {
       const camera = await readCameraSettings();
+      if(camera.paused)throw Object.assign(new Error('Capturas y análisis pausados por el administrador.'),{status:409});
       if (camera.version !== reading.orientationVersion || camera.rotation !== reading.rotation || !sameRoi(camera.roi,reading.roi))
         throw Object.assign(new Error('Los ajustes cambiaron durante el análisis. Espera una nueva captura.'), {status:409});
       const previous = await readVersionedState();
@@ -161,6 +171,6 @@ export function createStore(execute) {
     return {from,to,bins,cursor,total:bins.reduce((sum,bin)=>sum+bin.count,0),
       firstAt:bins[0]?.firstAt ?? null,lastAt:bins.at(-1)?.lastAt ?? null};
   }
-  return { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings };
+  return { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused };
 }
-export const { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings } = createStore(query);
+export const { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused } = createStore(query);

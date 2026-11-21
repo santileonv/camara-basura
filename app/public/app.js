@@ -28,12 +28,12 @@ function acceptCamera(next) {
 }
 function render() {
   const pending = last && cameraKnown && (last.rotation ?? 0) !== camera.rotation;
-  const fresh = last && !pending && !policyPending && Date.now() - last.receivedAt <= staleMs;
+  const fresh = last && !camera.paused && !pending && !policyPending && Date.now() - last.receivedAt <= staleMs;
   $('orientationStatus').textContent = cameraKnown ? (camera.rotation === 180 ? 'Orientación: girada 180°.' : 'Orientación: normal (0°).') +
     (pending ? ' Esperando una nueva captura para actualizar el análisis.' : ' El giro se aplica a la imagen y al análisis.') : 'Consultando orientación…';
   $('photo').classList.toggle('upsideDown', !!last && cameraKnown && camera.rotation !== (last.rotation ?? 0));
   const age = last ? Math.max(0, Math.floor((Date.now() - last.receivedAt) / 1000)) : null;
-  $('connection').textContent = pending ? 'Esperando captura con la nueva orientación' : (fresh ? 'Cámara enviando mediciones' : (last ? 'Sin mediciones recientes' : 'Esperando la primera captura'));
+  $('connection').textContent = camera.paused ? 'Capturas y análisis pausados por el administrador' : pending ? 'Esperando captura con la nueva orientación' : (fresh ? 'Cámara enviando mediciones' : (last ? 'Sin mediciones recientes' : 'Esperando la primera captura'));
   $('dot').className = 'dot' + (fresh ? ' online' : '');
   const progress=decisionProgress({state:last,online:!!fresh,configurationPending:!!(pending||policyPending),policy});
   $('decisionProgress').setAttribute('data-phase',progress.phase);
@@ -42,11 +42,12 @@ function render() {
   $('confirmationCount').textContent=`${progress.confirmations} / ${progress.requiredConfirmations}`;
   $('captureProgress').max=progress.requiredSamples;$('captureProgress').value=progress.samples;
   $('confirmationProgress').max=progress.requiredConfirmations;$('confirmationProgress').value=progress.confirmations;
+  if(camera.paused){$('progressTitle').textContent='Detección en pausa';$('progressHelp').textContent='La siguiente captura al reanudar iniciará un promedio nuevo.';}
   $('age').textContent = age === null ? '—' : 'Última captura hace ' + age + ' s';
-  const conclusion = policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
+  const conclusion = camera.paused ? 'Capturas y análisis pausados' : policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
-  $('detail').textContent=progress.phase==='collecting' ? 'Todavía faltan capturas para empezar a evaluar.' : progress.phase==='confirming' ? 'El promedio apoya un resultado. Falta confirmarlo con las siguientes capturas.' : progress.phase==='uncertain' ? 'La evidencia es ambigua: aún no apoya una conclusión clara.' : progress.phase==='confirmed' ? 'La conclusión reúne las capturas y confirmaciones necesarias.' : progress.detail;
+  $('detail').textContent=camera.paused ? 'El historial se conserva. El administrador puede reanudar la detección.' : progress.phase==='collecting' ? 'Todavía faltan capturas para empezar a evaluar.' : progress.phase==='confirming' ? 'El promedio apoya un resultado. Falta confirmarlo con las siguientes capturas.' : progress.phase==='uncertain' ? 'La evidencia es ambigua: aún no apoya una conclusión clara.' : progress.phase==='confirmed' ? 'La conclusión reúne las capturas y confirmaciones necesarias.' : progress.detail;
   // La barra expresa confianza en la conclusion mostrada. La suma de basura
   // se mantiene separada: para "Sin basura" usamos su complemento.
   const confidence = fresh && conclusion === 'Hay basura' ? last.trashAverage :
