@@ -20,6 +20,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   let live = true, viewEnd = null, earliest = null, navigationTimer, loaded = false;
   let selectedDay = localDayKey(Date.now()), fullDay = false, cache = null;
   let realtime = false, refreshQueued = false, policy = {windowSize:3,confirmationsRequired:2};
+  let resizeSource = null;
   const presetButtons = [...document.querySelectorAll('[data-chart-minutes]')];
   const scrollers = [...document.querySelectorAll('.historyScroller')];
   const positions = new WeakMap();
@@ -48,7 +49,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     selectedDay=localDayKey(stamp);live=false;fullDay=false;$('chartDateError').hidden=true;
     navigate(clampDayWindow(day,5*60000,stamp+60000).to,5*60000,true);
   }
-  const overview=createDayOverview({getDay:domain,getView:bounds,getNow:currentTime,onJump:focusRecord,onFit:fitRecords,onLastAvailable:showLatest});
+  const overview=createDayOverview({getDay:domain,getView:bounds,getNow:currentTime,onJump:focusRecord,onFit:fitRecords,onLastAvailable:showLatest,onResize:resizeVisibleWindow});
   function syncNavigation() {
     const extent = domain(), view = bounds(), span = extent.to - extent.from;
     const visible = view.to - view.from, travel = Math.max(0, span - visible);
@@ -284,6 +285,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   }
 
   function navigate(to, nextDuration = duration, immediate = false) {
+    resizeSource = null;
     clearTimeout(timer); clearTimeout(navigationTimer);
     const old = request; request = null; old?.abort();
     duration = nextDuration; live = false; viewEnd = to; refreshQueued = false;
@@ -292,6 +294,21 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     if(cache && view.from>=cache.from && Math.min(view.to,currentTime())<=cache.to) { applyData(cache,true); return; }
     render();
     if (immediate) refresh(true); else navigationTimer = setTimeout(() => refresh(true), 180);
+  }
+  function resizeVisibleWindow(view,{commit}) {
+    if(!active)return;
+    const day=domain();
+    fullDay=view.to-view.from===day.to-day.from;
+    if(commit){navigate(view.to,view.to-view.from,true);return;}
+    clearTimeout(timer);clearTimeout(navigationTimer);
+    const old=request;request=null;old?.abort();refreshQueued=false;
+    resizeSource ??= {entries:[...entries],context,limited};
+    live=false;viewEnd=view.to;duration=view.to-view.from;
+    if(cache && view.from>=cache.from && Math.min(view.to,currentTime())<=cache.to){applyData(cache,true);return;}
+    const available=[...(resizeSource.context?[resizeSource.context]:[]),...resizeSource.entries];
+    context=available.filter(row=>row.receivedAt<view.from).at(-1)??null;
+    entries=mergeChartEntries(resizeSource.entries,[],view.from,view.to);limited=resizeSource.limited;error='';
+    render();$('chartStatus').textContent='Ajustando intervalo… Al soltar se cargarán las mediciones del tramo elegido.';
   }
   for (const bar of scrollers) {
     bar.onscroll = () => {
@@ -339,6 +356,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   $('zoomInCharts').onclick = () => zoom(.5);
   $('zoomOutCharts').onclick = () => zoom(2);
   $('liveCharts').onclick = () => {
+    resizeSource = null;
     clearTimeout(navigationTimer); live = true; viewEnd = null; fullDay = false; duration = 5 * 60000; cache = null;
     $('chartDateError').hidden = true; refresh(true);
   };
@@ -370,6 +388,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     },
     start() { if (!active) { active = true; live = true; viewEnd = null; overview.start(); refresh(true); } },
     stop() {
+      resizeSource = null;
       active = false; overview.stop(); refreshQueued = false; clearTimeout(timer); clearTimeout(navigationTimer); clearTimeout(resizeTimer);
       const old = request; request = null; old?.abort();
       entries = []; context = null; cursor = null; selectedId = null; probability = null; spans = []; lastUpdated = null; loaded = false; cache = null;

@@ -28,6 +28,15 @@ export function clampDayWindow(day, duration, end) {
   const to = Math.max(day.from + span, Math.min(day.to, end));
   return { from:to - span, to };
 }
+// Ajustar un extremo sin desplazar el otro ni salir del día (también días de 23/25 h).
+export function resizeDayWindow(day, view, edge, timestamp, minimum = 60000) {
+  if (!['start','end'].includes(edge) || !Number.isFinite(timestamp) || !Number.isFinite(minimum) || minimum <= 0 ||
+      !day || !view || day.from >= day.to || view.from < day.from || view.to > day.to || view.from >= view.to)
+    throw new Error('Intervalo de selección inválido.');
+  const span = Math.min(minimum, view.to - view.from), target = Math.round(timestamp);
+  return edge === 'start' ? {from:Math.max(day.from,Math.min(view.to-span,target)),to:view.to} :
+    {from:view.from,to:Math.min(day.to,Math.max(view.from+span,target))};
+}
 
 export function coverageSessions(bins, gapMs = 90000) {
   const sessions=[];
