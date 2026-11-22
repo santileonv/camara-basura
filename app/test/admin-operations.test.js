@@ -51,9 +51,19 @@ test('Pausa privada persistente: CSRF, placa, descarte sin inferencia y reanudac
     assert.equal((await fetch(base+'/api/device/control',{headers:cameraHeaders})).status,200);
     const control=await fetch(base+'/api/device/control',{headers:{...cameraHeaders,'x-control-protocol':'1','x-device-mode':'paused','x-control-version':'1'}});
     assert.equal(await control.text(),'PAUSE\n1\n');assert.match(control.headers.get('cache-control'),/no-store/);
+    const protocol2={...cameraHeaders,'x-control-protocol':'2','x-device-mode':'paused','x-control-version':'1','x-preview-mode':'active'};
+    const v2Paused=await fetch(base+'/api/device/control',{headers:protocol2});
+    assert.equal(await v2Paused.text(),'PAUSE\n1\nIDLE\n');assert.equal(v2Paused.headers.get('x-preview-active'),'0');
+    const skippedV2=await fetch(base+'/api/ingest',{method:'POST',headers:{...protocol2,'content-type':'image/jpeg','x-camera-boot':'0123456789abcdef','x-frame-seq':'5'},body:Buffer.from([255,216,255,217])});
+    assert.equal(skippedV2.status,200);assert.equal(skippedV2.headers.get('x-preview-active'),'0');assert.equal(analyses,4);
+    for(const path of ['/api/admin/live','/api/admin/live/stream','/api/device/preview','/admin-live.js']){
+      const removed=await fetch(base+path,{headers:owner});assert.equal(removed.status,404);
+    }
     const snapshot=await(await fetch(base+'/api/admin/operations',{headers:owner})).json();assert.equal(snapshot.device.paused,true);assert.equal(snapshot.device.online,true);
     assert.equal((await put({paused:false,expectedVersion:'1'})).status,200);
     assert.equal(await(await fetch(base+'/api/device/control',{headers:cameraHeaders})).text(),'RUN\n2\n');
+    const v2Running=await fetch(base+'/api/device/control',{headers:{...protocol2,'x-device-mode':'running','x-control-version':'2'}});
+    assert.equal(await v2Running.text(),'RUN\n2\nIDLE\n');assert.equal(v2Running.headers.get('x-preview-active'),'0');
     assert.equal((await send(6)).status,200);assert.equal((await store.readState()).history.length,1);assert.equal((await store.readState()).conclusion,'No seguro');
     assert.equal((await store.readHistory()).entries.length,before.length+1);
     pauseDuringAnalysis=true;assert.equal((await send(7)).status,409);assert.equal((await store.readHistory()).entries.length,before.length+1);

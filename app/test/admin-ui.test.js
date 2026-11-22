@@ -4,7 +4,6 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {DEFAULT_ROI,sameRoi} from '../public/roi-geometry.js';
 import {createRoiEditor} from '../public/roi-editor.js';
-import {createAdminLive} from '../public/admin-live.js';
 import {createAdminTools} from '../public/admin-tools.js';
 
 class Element {
@@ -45,7 +44,7 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
     throw Error('Ruta inesperada: '+path);
   };
   const document={hidden:false,getElementById:get,addEventListener(){}};
-  const context=vm.createContext({document,fetch,DEFAULT_ROI,sameRoi,createRoiEditor,createAdminLive,createAdminTools:options=>{const tools=createAdminTools(options);t.after(()=>tools.stop());return tools;},AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
+  const context=vm.createContext({document,fetch,DEFAULT_ROI,sameRoi,createRoiEditor,createAdminTools:options=>{const tools=createAdminTools(options);t.after(()=>tools.stop());return tools;},AbortSignal,setTimeout(){return 1;},clearTimeout(){}});
   vm.runInContext((await readFile(new URL('../public/admin.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,''),context);
   await new Promise(resolve=>setImmediate(resolve));assert.equal(get('loginPanel').hidden,false);assert.equal(get('adminPanel').hidden,true);
   get('adminPassword').value='test-ui-password';await get('loginForm').dispatch('submit');await new Promise(resolve=>setImmediate(resolve));

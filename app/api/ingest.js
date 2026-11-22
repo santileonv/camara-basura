@@ -4,7 +4,6 @@ import { classify } from '../lib/model.js';
 import { saveReading, readCameraSettings } from '../lib/store.js';
 import { liveEvents } from '../lib/live-events.js';
 import { DEFAULT_ROI } from '../public/roi-geometry.js';
-import {livePreview} from '../lib/live-preview.js';
 import {deviceStatus} from '../lib/device-status.js';
 
 export function createIngestHandler(analyze = classify, save = saveReading, readCamera = readCameraSettings, publish = liveEvents.publish) {
@@ -19,7 +18,8 @@ return async function handler(req, res) {
     const receivedAt = Date.now();
     deviceStatus.note(req);
     const camera = await readCamera();
-    res.setHeader('X-Preview-Active',livePreview.active()?'1':'0');
+    // Apaga la vista retirada también en placas con el firmware de protocolo 2.
+    res.setHeader('X-Preview-Active','0');
     res.setHeader('X-Capture-Paused',camera.paused?'1':'0');
     res.setHeader('X-Control-Version',camera.version);
     if(camera.paused)return reply(res,200,{ok:true,paused:true,message:'Capturas y análisis pausados. No se guardó una medición.'});
