@@ -9,7 +9,7 @@ const FILES = {
   '/chart-overview.js': ['chart-overview.js', 'application/javascript'],
   '/charts.css': ['charts.css', 'text/css'],
   '/admin': ['admin.html', 'text/html'], '/admin/': ['admin.html', 'text/html'],
-  '/admin.js': ['admin.js', 'application/javascript'], '/admin-live.js':['admin-live.js','application/javascript'], '/admin-tools.js':['admin-tools.js','application/javascript'], '/admin.css': ['admin.css', 'text/css'],
+  '/admin.js': ['admin.js', 'application/javascript'], '/admin-tools.js':['admin-tools.js','application/javascript'], '/admin.css': ['admin.css', 'text/css'],
   '/roi-geometry.js':['roi-geometry.js','application/javascript'], '/roi-editor.js':['roi-editor.js','application/javascript'],
   '/decision-progress.js':['decision-progress.js','application/javascript'],
   '/style.css': ['style.css', 'text/css'], '/history.css': ['history.css', 'text/css'],

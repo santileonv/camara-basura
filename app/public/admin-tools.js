@@ -10,7 +10,7 @@ export function createAdminTools({get,document:doc,request,getCamera,isAuthentic
     get('operationStatus').textContent=operation?.maintenancePaused?'Hay una pausa de mantenimiento en Railway (INGEST_PAUSED). Debe retirarse allí para reanudar.':
       paused?'El servidor no analiza ni guarda nuevas mediciones. El historial se conserva.':'La cámara puede enviar fotografías y el servidor registra sus análisis.';
     get('devicePauseStatus').textContent=device?.online&&device.version===camera?.version&&device.paused===paused?
-      (paused?'La XIAO confirmó la pausa de las fotos de análisis.':'La XIAO confirmó que las fotos de análisis están activas.'):
+      (paused?'La XIAO confirmó la pausa de capturas.':'La XIAO confirmó que las capturas están activas.'):
       device?.online?'Esperando que la XIAO confirme la última orden.':
       'Sin confirmación reciente de la placa. Para detener también la toma de fotos, carga el firmware actualizado conservando tu config.h.';
   }

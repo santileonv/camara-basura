@@ -28,12 +28,8 @@ static char bootId[17];
 // La pausa se confirma antes de capturar al arrancar. En marcha llega con la respuesta HTTPS.
 static bool capturePaused = true, controlReady = false, cameraInitialized = false;
 static uint32_t lastControlAttempt = 0;
-static String controlVersion = "0", controlURL, previewURL;
-static bool previewRequested = false;
-static uint32_t nextPreview = 0;
-struct HttpReply { String text; int paused = -1; int preview = -1; String version; };
-static HttpReply previewResponse;
-static esp_http_client_handle_t previewClient = nullptr;
+static String controlVersion = "0", controlURL;
+struct HttpReply { String text; int paused = -1; String version; };
 static bool validVersion(const String &value) {
   if (!value.length() || value.length() > 19) return false;
   for (size_t i = 0; i < value.length(); ++i) if (value[i] < '0' || value[i] > '9') return false;
@@ -72,8 +68,6 @@ static esp_err_t onHttpEvent(esp_http_client_event_t *event) {
     if (strcasecmp(event->header_key, "X-Capture-Paused") == 0)
       response->paused = strcmp(event->header_value, "1") == 0 ? 1 : strcmp(event->header_value, "0") == 0 ? 0 : -1;
     if (strcasecmp(event->header_key, "X-Control-Version") == 0) response->version = event->header_value;
-    if (strcasecmp(event->header_key, "X-Preview-Active") == 0)
-      response->preview = strcmp(event->header_value, "1") == 0 ? 1 : strcmp(event->header_value, "0") == 0 ? 0 : -1;
   }
   if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
     const size_t room = response->text.length() < 768 ? 768 - response->text.length() : 0;
@@ -83,50 +77,8 @@ static esp_err_t onHttpEvent(esp_http_client_event_t *event) {
   return ESP_OK;
 }
 
-static void closePreviewClient() {
-  if (previewClient) { esp_http_client_cleanup(previewClient); previewClient = nullptr; }
-}
-
-static void deviceHeaders(esp_http_client_handle_t client) {
-  const String authorization = String("Bearer ") + CAMERA_TOKEN;
-  esp_http_client_set_header(client, "Authorization", authorization.c_str());
-  esp_http_client_set_header(client, "X-Control-Protocol", "2");
-  esp_http_client_set_header(client, "X-Device-Mode", capturePaused ? "paused" : "running");
-  esp_http_client_set_header(client, "X-Control-Version", controlVersion.c_str());
-  esp_http_client_set_header(client, "X-Preview-Mode", previewRequested ? "active" : "idle");
-}
-
-// Vista privada saliente: no abre puertos y no escribe mediciones ni ejecuta el modelo.
-static bool sendPreview(camera_fb_t *frame) {
-  previewResponse = HttpReply{};
-  if (!previewClient) {
-    esp_http_client_config_t config = {};
-    config.url = previewURL.c_str(); config.method = HTTP_METHOD_POST;
-    config.cert_pem = TRUSTED_ROOTS; config.timeout_ms = 4000;
-    config.keep_alive_enable = true; config.disable_auto_redirect = true;
-    config.event_handler = onHttpEvent; config.user_data = &previewResponse;
-    previewClient = esp_http_client_init(&config);
-    if (!previewClient) return false;
-  }
-  deviceHeaders(previewClient);
-  esp_http_client_set_header(previewClient, "Content-Type", "image/jpeg");
-  esp_http_client_set_post_field(previewClient, reinterpret_cast<const char *>(frame->buf), frame->len);
-  const esp_err_t result = esp_http_client_perform(previewClient);
-  const int status = esp_http_client_get_status_code(previewClient);
-  if (previewResponse.preview == 0) previewRequested = false;
-  const bool sent = result == ESP_OK && status == 200;
-  if (!sent && status != 429) {
-    Serial.printf("Vista en vivo: HTTP %d. Reconsultando la orden...\n", status);
-    controlReady = false; closePreviewClient();
-  }
-  if (!previewRequested) closePreviewClient();
-  return sent;
-}
-
-// En pausa consulta una orden pequeña cada 3 s; la vista privada es independiente.
-
+// Al pausar deja de pedir cuadros al sensor; consulta solo una orden pequeña cada 3 s.
 static bool readControl() {
-  closePreviewClient(); // Una sola conexión TLS a la vez en la placa.
   HttpReply response;
   esp_http_client_config_t config = {};
   config.url = controlURL.c_str(); config.method = HTTP_METHOD_GET;
@@ -134,32 +86,29 @@ static bool readControl() {
   config.disable_auto_redirect = true; config.event_handler = onHttpEvent; config.user_data = &response;
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client) return false;
-  deviceHeaders(client);
+  const String authorization = String("Bearer ") + CAMERA_TOKEN;
+  esp_http_client_set_header(client, "Authorization", authorization.c_str());
+  esp_http_client_set_header(client, "X-Control-Protocol", "1");
+  esp_http_client_set_header(client, "X-Device-Mode", capturePaused ? "paused" : "running");
+  esp_http_client_set_header(client, "X-Control-Version", controlVersion.c_str());
   const esp_err_t result = esp_http_client_perform(client);
   const int status = esp_http_client_get_status_code(client);
   esp_http_client_cleanup(client);
   const int separator = response.text.indexOf('\n');
   String command = response.text.substring(0, separator < 0 ? 0 : separator);
-  const int second = separator < 0 ? -1 : response.text.indexOf('\n', separator + 1);
-  String version = second < 0 ? String("") : response.text.substring(separator + 1, second); version.trim();
-  String live = second < 0 ? String("") : response.text.substring(second + 1); live.trim();
-  if (result != ESP_OK || status != 200 || (command != "RUN" && command != "PAUSE") || !validVersion(version) || (live != "PREVIEW" && live != "IDLE")) {
+  String version = separator < 0 ? String("") : response.text.substring(separator + 1); version.trim();
+  if (result != ESP_OK || status != 200 || (command != "RUN" && command != "PAUSE") || !validVersion(version)) {
     Serial.printf("No se pudo consultar la pausa (HTTP %d). Reintentando sin capturar...\n", status);
     return false;
   }
   const bool paused = command == "PAUSE";
-  if (!controlReady || paused != capturePaused) Serial.println(paused ? "Deteccion pausada por el administrador." : "Deteccion reanudada.");
+  if (!controlReady || paused != capturePaused) Serial.println(paused ? "Capturas y analisis pausados por el administrador." : "Capturas y analisis reanudados.");
   capturePaused = paused; controlVersion = version; controlReady = true;
-  const bool requested = live == "PREVIEW";
-  if (requested != previewRequested) Serial.println(requested ? "Vista en vivo privada activada." : "Vista en vivo detenida.");
-  previewRequested = requested;
-  if (!previewRequested) closePreviewClient();
   return true;
 }
 
 // HTTPS verifica certificado y nombre del servidor mediante certificados.h.
 static bool sendPhoto(camera_fb_t *frame) {
-  closePreviewClient(); // Prioridad y memoria para el envío de análisis.
   HttpReply response; response.text.reserve(768);
   esp_http_client_config_t config = {};
   config.url = SERVER_URL;
@@ -177,7 +126,9 @@ static bool sendPhoto(camera_fb_t *frame) {
   esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
   esp_http_client_set_header(client, "X-Camera-Boot", bootId);
   esp_http_client_set_header(client, "X-Frame-Seq", frameNumber.c_str());
-  deviceHeaders(client);
+  esp_http_client_set_header(client, "X-Control-Protocol", "1");
+  esp_http_client_set_header(client, "X-Device-Mode", capturePaused ? "paused" : "running");
+  esp_http_client_set_header(client, "X-Control-Version", controlVersion.c_str());
   esp_http_client_set_post_field(client, reinterpret_cast<const char *>(frame->buf), frame->len);
   const uint32_t started = millis();
   const esp_err_t result = esp_http_client_perform(client);
@@ -189,9 +140,8 @@ static bool sendPhoto(camera_fb_t *frame) {
   else Serial.println(response.text);
   if (result == ESP_OK && status == 200 && response.paused >= 0 && validVersion(response.version)) {
     const bool paused = response.paused == 1;
-    if (paused && !capturePaused) Serial.println("Pausa recibida: se detienen las capturas de analisis; el video privado es independiente.");
+    if (paused && !capturePaused) Serial.println("Pausa recibida: no se tomaran mas capturas hasta reanudar.");
     capturePaused = paused; controlVersion = response.version; controlReady = true;
-    previewRequested = response.preview == 1;
   } else controlReady = false;
   if (status == 401 || status == 403) Serial.println("Revisa CAMERA_TOKEN y que la URL de produccion permita acceso a la API.");
   if (status >= 300 && status < 400) Serial.println("Redireccion inesperada: usa la URL HTTPS de produccion terminada en /api/ingest.");
@@ -211,7 +161,6 @@ void setup() {
   String serverURL(SERVER_URL);
   if (!serverURL.endsWith("/api/ingest")) { Serial.println("SERVER_URL debe terminar en /api/ingest."); return; }
   controlURL = serverURL.substring(0, serverURL.length() - strlen("/api/ingest")) + "/api/device/control";
-  previewURL = serverURL.substring(0, serverURL.length() - strlen("/api/ingest")) + "/api/device/preview";
   const esp_err_t result = initCamera();
   if (result != ESP_OK) { Serial.printf("Error de camara: 0x%x\n", static_cast<unsigned>(result)); return; }
   cameraInitialized = true;
@@ -229,7 +178,7 @@ void loop() {
   if (!configured) { delay(250); return; }
   const uint32_t now = millis();
   if (WiFi.status() != WL_CONNECTED) {
-    if (wifiWasConnected) { wifiWasConnected = false; controlReady = false; closePreviewClient(); Serial.println("WiFi desconectado. Reconectando..."); }
+    if (wifiWasConnected) { wifiWasConnected = false; controlReady = false; Serial.println("WiFi desconectado. Reconectando..."); }
     if (now - lastWifiAttempt >= 20000) { WiFi.reconnect(); lastWifiAttempt = now; }
     delay(100); return;
   }
@@ -241,8 +190,7 @@ void loop() {
     if (now - lastClockWarning > 15000) { lastClockWarning = now; Serial.println("Esperando hora de Internet (NTP) para HTTPS..."); }
     delay(100); return;
   }
-  if (capturePaused && !previewRequested && cameraInitialized) { esp_camera_deinit(); cameraInitialized = false; }
-  if (!previewRequested) closePreviewClient();
+  if (capturePaused && cameraInitialized) { esp_camera_deinit(); cameraInitialized = false; }
   if (!controlReady || capturePaused) {
     const uint32_t controlNow = millis();
     if (lastControlAttempt == 0 || controlNow - lastControlAttempt >= 3000) {
@@ -250,44 +198,25 @@ void loop() {
       if (!readControl()) { delay(100); return; }
       if (!capturePaused) nextCapture = millis();
     }
-    if (!controlReady || (capturePaused && !previewRequested)) { delay(100); return; }
+    if (!controlReady || capturePaused) { delay(100); return; }
   }
+  if (static_cast<int32_t>(millis() - nextCapture) < 0) { delay(50); return; }
   if (!cameraInitialized) {
-    if (static_cast<int32_t>(millis() - nextCapture) < 0) { delay(50); return; }
     const esp_err_t result = initCamera();
     if (result != ESP_OK) { Serial.println("No se pudo reactivar la camara. Reintentando..."); nextCapture = millis() + 3000; return; }
     cameraInitialized = true;
   }
-  if (!capturePaused && static_cast<int32_t>(millis() - nextCapture) >= 0) {
-    const uint32_t cycleStarted = millis();
-    camera_fb_t *frame = esp_camera_fb_get();
-    if (frame) esp_camera_fb_return(frame);
-    frame = esp_camera_fb_get();
-    bool sent = false;
-    if (frame) {
-      sent = sendPhoto(frame);
-      if (previewRequested && static_cast<int32_t>(millis() - nextPreview) >= 0) {
-        sendPreview(frame); nextPreview = millis() + 500;
-      }
-      esp_camera_fb_return(frame);
-    } else Serial.println("No se pudo obtener una captura.");
-    const uint32_t elapsed = millis() - cycleStarted;
-    const uint32_t interval = DEMO_MODE ? DEMO_CYCLE_MS : CAPTURE_INTERVAL_MS;
-    const uint32_t pause = capturePauseMs(sent, DEMO_MODE, interval, elapsed);
-    nextCapture = millis() + pause;
-    Serial.printf("Ciclo %lu ms | espera %lu ms | modo %s\n", static_cast<unsigned long>(elapsed),
-      static_cast<unsigned long>(pause), DEMO_MODE ? "demo 5s" : "estable");
-  }
-  if (controlReady && previewRequested && static_cast<int32_t>(millis() - nextPreview) >= 0 &&
-      (capturePaused || static_cast<int32_t>(nextCapture - millis()) > 700)) {
-    const uint32_t started = millis();
-    camera_fb_t *frame = esp_camera_fb_get();
-    if (frame) esp_camera_fb_return(frame);
-    frame = esp_camera_fb_get();
-    bool sent = false;
-    if (frame) { sent = sendPreview(frame); esp_camera_fb_return(frame); }
-    const uint32_t elapsed = millis() - started;
-    nextPreview = millis() + (sent ? (elapsed >= 500 ? 0 : 500 - elapsed) : 1000);
-  }
-  delay(10);
+  const uint32_t cycleStarted = millis();
+  camera_fb_t *frame = esp_camera_fb_get();
+  if (frame) esp_camera_fb_return(frame); // Descartar un cuadro para pedir uno reciente.
+  frame = esp_camera_fb_get();
+  bool sent = false;
+  if (frame) { sent = sendPhoto(frame); esp_camera_fb_return(frame); }
+  else Serial.println("No se pudo obtener una captura.");
+  const uint32_t elapsed = millis() - cycleStarted;
+  const uint32_t interval = DEMO_MODE ? DEMO_CYCLE_MS : CAPTURE_INTERVAL_MS;
+  const uint32_t pause = capturePauseMs(sent, DEMO_MODE, interval, elapsed);
+  nextCapture = millis() + pause;
+  Serial.printf("Ciclo %lu ms | espera %lu ms | modo %s\n", static_cast<unsigned long>(elapsed),
+    static_cast<unsigned long>(pause), DEMO_MODE ? "demo 5s" : "estable");
 }
