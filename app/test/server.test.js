@@ -10,6 +10,7 @@ import { createStateHandler } from '../api/state.js';
 import { createHistoryHandler } from '../api/history.js';
 import { createChartHistoryHandler } from '../api/chart-history.js';
 import { createChartCoverageHandler } from '../api/chart-coverage.js';
+import {createDecisionTrendsHandler} from '../api/decision-trends.js';
 import { classify } from '../lib/model.js';
 
 test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y salud', async () => {
@@ -24,7 +25,7 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     let healthy = true;
     const routes = {'/api/ingest':createIngestHandler(classify,store.saveReading,store.readCameraSettings),
       '/api/state':createStateHandler(store.readCameraView),'/api/history':createHistoryHandler(store.readHistory),
-      '/api/chart-history':createChartHistoryHandler(store.readChartHistory),'/api/chart-coverage':createChartCoverageHandler(store.readChartCoverage)};
+      '/api/chart-history':createChartHistoryHandler(store.readChartHistory),'/api/chart-coverage':createChartCoverageHandler(store.readChartCoverage),'/api/decision-trends':createDecisionTrendsHandler(store.readDecisionTrends)};
     app=createServer({routes,health:async()=>{if(!healthy)throw new Error('test-health');await db.query('SELECT 1');}});
     await new Promise((resolve,reject)=>{app.server.once('error',reject);app.server.listen(0,'127.0.0.1',resolve);});
     const base='http://127.0.0.1:'+app.server.address().port;
@@ -39,6 +40,8 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     assert.equal((await request('/api/history')).status,200);
     assert.equal((await request('/api/chart-history')).status,200);
     for(const path of ['/admin','/admin/','/admin.js','/admin.css','/charts.js','/chart-overview.js','/chart-data.js','/charts.css']) assert.equal((await request(path)).status,200);
+    for(const path of ['/dashboard.css','/dashboard-data.js','/dashboard-live.js','/decision-trends.js'])assert.equal((await request(path)).status,200);
+    for(const id of ['decisionBadge','decisionAction','toggleAlertSound','decisionTrends','hourlyTrends','trendEvents'])assert.ok(pageText.includes(`id="${id}"`));
     assert.equal((await request('/api/ingest',{method:'POST'})).status,401);
     for(const path of ['/api/export.json','/api/export.csv','/history-format.js']) assert.equal((await request(path)).status,404);
     assert.doesNotMatch(await(await request('/')).text(),/type="password"|Descargar|exportJSON|exportHistory/);
@@ -58,6 +61,9 @@ test('Servidor HTTP: foto real, modelo, PostgreSQL, autenticacion, historial y s
     const graph=await(await request('/api/chart-history?minutes=15')).json();
     assert.equal(graph.entries.length,5);assert.equal(graph.entries[0].scores.length,4);
     const now=Date.now(),summary=await(await request(`/api/chart-coverage?from=${now-3600000}&to=${now}`)).json();
+    const trends=await(await request(`/api/decision-trends?from=${now-3600000}&to=${now}`)).json();
+    assert.equal(trends.totals.total,5);assert.equal(trends.totals.trash+trends.totals.clear+trends.totals.unsure,5);
+    assert.ok(Array.isArray(trends.events));assert.ok(!JSON.stringify(trends).includes('preview'));
     assert.equal(summary.total,5);assert.equal(summary.bins[0].preview,undefined);
     assert.equal(Number((await db.query('SELECT count(*) AS n FROM mediciones')).rows[0].n),5);
     healthy=false;assert.equal((await request('/healthz')).status,503);

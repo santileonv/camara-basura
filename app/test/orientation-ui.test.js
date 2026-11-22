@@ -4,12 +4,14 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import {DEFAULT_ROI,roiBounds} from '../public/roi-geometry.js';
 import {decisionProgress} from '../public/decision-progress.js';
+import {createLiveDecision} from '../public/dashboard-live.js';
+import {createDecisionTrends} from '../public/decision-trends.js';
 
 // Superficie DOM pequena para ejecutar los eventos reales del monitor sin navegador.
 class Element {
   constructor() {
     this.hidden = false; this.disabled = false; this.style = {}; this.attributes = {}; this.children = [];
-    this.textContent = ''; const classes = new Set();
+    this.textContent = '';this.dataset={}; const classes = new Set();
     this.classList = { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains: name => classes.has(name) };
   }
   append(...nodes) { this.children.push(...nodes); }
@@ -32,9 +34,10 @@ test('El monitor publico muestra la orientacion fija y la confianza, sin control
     requests.push({url,method:options.method??'GET'});
     if(url==='/api/state')return response({state:{...reading},camera:{...camera},canManageCamera:true,staleMs:90000}); // Cliente antiguo no debe activar controles.
     if(url.startsWith('/api/history'))return response({entries:[],nextCursor:null});
+    if(url.startsWith('/api/decision-trends'))return response({now:Date.now(),bins:[],events:[],totals:{total:0,trash:0,clear:0,unsure:0}});
     throw Error('Ruta inesperada: '+url);
   };
-  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,document,fetch,AbortController,AbortSignal,URL,URLSearchParams,Blob,
+  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,createLiveDecision,createDecisionTrends,document,fetch,AbortController,AbortSignal,URL,URLSearchParams,Blob,
     setTimeout:fn=>{const id=++timerId;timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id),setInterval(){},createCharts:()=>({start(){},stop(){}})});
   const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
@@ -60,7 +63,8 @@ test('El monitor publico muestra la orientacion fija y la confianza, sin control
 test('Avisos en vivo: refrescan al guardar, reconcilian un aviso durante una consulta y usan respaldo al desconectarse',async()=>{
   const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   const listeners={},timers=new Map();let timerId=0,stateRequests=0,release;
-  const document={getElementById:get,createElement:()=>new Element(),hidden:false,addEventListener(name,fn){listeners[name]=fn;}};
+  const callbacks={};
+  const document={getElementById:get,createElement:()=>new Element(),hidden:false,addEventListener(name,fn){(callbacks[name]??=[]).push(fn);listeners[name]=()=>callbacks[name].forEach(callback=>callback());}};
   const chartCalls=[];const charts={start(){},setPolicy(p){chartCalls.push(['policy',p.windowSize,p.confirmationsRequired]);},setRealtime(v){chartCalls.push(['live',v]);},notify(){chartCalls.push(['notify']);}};
   class Events {
     static instances=[];
@@ -73,9 +77,10 @@ test('Avisos en vivo: refrescan al guardar, reconcilian un aviso durante una con
   const state=()=>response({camera:{rotation:180,version:'0'},state:reading,staleMs:90000,decision:{profile:'demo',windowSize:3,confirmationsRequired:2}});
   const fetch=async url=>{
     if(url==='/api/state'){stateRequests++;if(stateRequests===1)return new Promise(resolve=>{release=()=>resolve(state());});return state();}
+    if(url.startsWith('/api/decision-trends'))return response({now:Date.now(),bins:[],events:[],totals:{total:0,trash:0,clear:0,unsure:0}});
     return response({entries:[],nextCursor:null});
   };
-  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,document,fetch,EventSource:Events,AbortSignal,URLSearchParams,createCharts:()=>charts,
+  const context=vm.createContext({DEFAULT_ROI,roiBounds,decisionProgress,createLiveDecision,createDecisionTrends,document,fetch,EventSource:Events,AbortSignal,URLSearchParams,createCharts:()=>charts,
     setTimeout(fn,ms){const id=++timerId;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id),setInterval(){}});
   const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
   vm.runInContext(source,context);assert.equal(stateRequests,1);

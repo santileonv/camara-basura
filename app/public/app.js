@@ -2,8 +2,12 @@
 import { createCharts } from './charts.js';
 import {DEFAULT_ROI,roiBounds} from './roi-geometry.js';
 import {decisionProgress} from './decision-progress.js';
+import {createLiveDecision} from './dashboard-live.js';
+import {createDecisionTrends} from './decision-trends.js';
 const $ = id => document.getElementById(id);
-const charts = createCharts();
+const liveDecision=createLiveDecision({get:$,document,schedule:setTimeout,cancel:clearTimeout});
+const trends=createDecisionTrends({get:$,document,request:(...args)=>fetch(...args),schedule:setTimeout,cancel:clearTimeout,onExplore:range=>{charts.focusRange(range);$('decisionTitle').scrollIntoView?.({block:'start',behavior:globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}});
+const charts = createCharts({onDayChange:key=>trends.selectDay(key),onRefresh:()=>trends.refresh()});
 const labels = ['Sin basura', 'Hay basura'];
 const rows = labels.map(label => {
   const row = document.createElement('div'); row.className = 'classRow';
@@ -20,6 +24,7 @@ let policy = {profile:'demo',windowSize:3,minimumReadings:3,confirmationsRequire
 let historyEntries = [], historyCursor = null, historyBusy = false, historyLoaded = false;
 let camera = { rotation: 180, version: '0' }, cameraKnown = false;
 let activeThreshold = .8;
+let apiError=false;
 const percent = value => (100 * value).toFixed(1) + ' %';
 function acceptCamera(next) {
   // Una respuesta atrasada de otra consulta no deshace el cambio recien guardado.
@@ -44,10 +49,12 @@ function render() {
   $('confirmationProgress').max=progress.requiredConfirmations;$('confirmationProgress').value=progress.confirmations;
   if(camera.paused){$('progressTitle').textContent='Detección en pausa';$('progressHelp').textContent='La siguiente captura al reanudar iniciará un promedio nuevo.';}
   $('age').textContent = age === null ? '—' : 'Última captura hace ' + age + ' s';
-  const conclusion = camera.paused ? 'Capturas y análisis pausados' : policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
+  const conclusion = apiError ? 'Sin conexión con el servidor' : camera.paused ? 'Capturas y análisis pausados' : policyPending ? 'Esperando capturas con los nuevos ajustes' : pending ? 'Esperando nueva captura' : (fresh ? last.conclusion : (last ? 'Sin datos recientes' : 'Esperando datos'));
   $('conclusion').textContent = conclusion;
   $('result').className = 'card result' + (fresh && conclusion === 'Hay basura' ? ' trash' : (fresh && conclusion === 'Sin basura' ? ' clear' : ''));
+  liveDecision.render({state:last,fresh:!!fresh,paused:!!camera.paused,pending:!!(pending||policyPending),error:apiError,realtime:streamConnected});
   $('detail').textContent=camera.paused ? 'El historial se conserva. El administrador puede reanudar la detección.' : progress.phase==='collecting' ? 'Todavía faltan capturas para empezar a evaluar.' : progress.phase==='confirming' ? 'El promedio apoya un resultado. Falta confirmarlo con las siguientes capturas.' : progress.phase==='uncertain' ? 'La evidencia es ambigua: aún no apoya una conclusión clara.' : progress.phase==='confirmed' ? 'La conclusión reúne las capturas y confirmaciones necesarias.' : progress.detail;
+  if(apiError)$('detail').textContent='No se puede confirmar el estado actual hasta recuperar la conexión.';
   // La barra expresa confianza en la conclusion mostrada. La suma de basura
   // se mantiene separada: para "Sin basura" usamos su complemento.
   const confidence = fresh && conclusion === 'Hay basura' ? last.trashAverage :
@@ -85,6 +92,7 @@ async function poll() {
     const response = await fetch('/api/state', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo consultar el servidor.');
+    const previousStamp=last?.receivedAt;apiError=false;
     acceptCamera(data.camera); last = data.state; staleMs = data.staleMs;
     activeThreshold = data.camera.threshold ?? last?.threshold ?? .8;
     policy = data.decision ?? {profile:'stable',windowSize:last?.windowSize ?? 5,minimumReadings:3,confirmationsRequired:last?.confirmationsRequired ?? 3};
@@ -95,9 +103,10 @@ async function poll() {
       $('photo').hidden = false; $('crop').hidden = false; $('photoEmpty').hidden = true;
     } else { $('photo').hidden = true; $('crop').hidden = true; $('photoEmpty').hidden = false; }
     $('notice').textContent = ''; render();
+    if(last?.receivedAt!==previousStamp)trends.notify();
     if (!historyLoaded && !historyBusy) loadHistory(true);
   } catch (error) {
-    last = null; render(); $('notice').textContent = error.message || 'No se pudo conectar. Intenta nuevamente.';
+    apiError=true;last = null; render(); $('notice').textContent = error.message || 'No se pudo conectar. Intenta nuevamente.';
   } finally {
     busy = false;
     if (!document.hidden) {
@@ -164,6 +173,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) disconnectStream(); else { connectStream(); poll(); }
 });
 setInterval(() => { if (!document.hidden) render(); }, 1000);
-charts.start();
+trends.start();charts.start();
 connectStream();
 poll();

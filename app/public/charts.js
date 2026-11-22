@@ -12,7 +12,7 @@ function node(tag, attributes = {}, text) {
   return element;
 }
 
-export function createCharts({ onUnauthorized = () => {} } = {}) {
+export function createCharts({ onUnauthorized = () => {}, onDayChange=()=>{}, onRefresh=()=>{} } = {}) {
   const $ = id => document.getElementById(id);
   let active = false, entries = [], cursor = null, duration = 5 * 60000, staleMs = 90000;
   let request = null, timer, resizeTimer, skew = 0, lastUpdated = null, limited = false, error = '';
@@ -21,6 +21,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   let selectedDay = localDayKey(Date.now()), fullDay = false, cache = null;
   let realtime = false, refreshQueued = false, policy = {windowSize:3,confirmationsRequired:2};
   let resizeSource = null;
+  let sharedDay=null;
   const presetButtons = [...document.querySelectorAll('[data-chart-minutes]')];
   const scrollers = [...document.querySelectorAll('.historyScroller')];
   const positions = new WeakMap();
@@ -52,6 +53,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   const overview=createDayOverview({getDay:domain,getView:bounds,getNow:currentTime,onJump:focusRecord,onFit:fitRecords,onLastAvailable:showLatest,onResize:resizeVisibleWindow});
   function syncNavigation() {
     const extent = domain(), view = bounds(), span = extent.to - extent.from;
+    if(sharedDay!==selectedDay){sharedDay=selectedDay;onDayChange(selectedDay);}
     const visible = view.to - view.from, travel = Math.max(0, span - visible);
     const fraction = travel ? Math.max(0, Math.min(1, (view.from - extent.from) / travel)) : 0;
     for (const bar of scrollers) {
@@ -361,7 +363,7 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
     $('chartDateError').hidden = true; refresh(true);
   };
   $('showCaptures').onchange = () => render();
-  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); cache = null; overview.reload(); refresh(true); };
+  $('refreshCharts').onclick = () => { clearTimeout(navigationTimer); cache = null; overview.reload(); refresh(true); onRefresh(); };
   document.addEventListener('visibilitychange', () => {
     clearTimeout(timer); clearTimeout(navigationTimer);
     if (document.hidden) { const old = request; request = null; old?.abort(); }
@@ -371,6 +373,10 @@ export function createCharts({ onUnauthorized = () => {} } = {}) {
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe($('chartSections'));
   else window.addEventListener('resize', resize);
   return {
+    focusRange({from,to}){
+      const day=domain();from=Math.max(day.from,from);to=Math.min(day.to,to);
+      if(Number.isFinite(from)&&Number.isFinite(to)&&from<to){fullDay=false;navigate(to,to-from,true);}
+    },
     setPolicy(next) {
       policy = next;
       $('chartWindowDescription').textContent = `La línea gruesa muestra Botellas + Papeles y Cartones + Bolsas. Configuración actual: promedio de hasta ${next.windowSize} capturas. Cada registro anterior conserva su promedio original.`;

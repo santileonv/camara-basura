@@ -171,6 +171,36 @@ export function createStore(execute) {
     return {from,to,bins,cursor,total:bins.reduce((sum,bin)=>sum+bin.count,0),
       firstAt:bins[0]?.firstAt ?? null,lastAt:bins.at(-1)?.lastAt ?? null};
   }
-  return { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused };
+  async function readDecisionTrends({from,to,now=Date.now()}) {
+    if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<0||from>=to||to>now||to-from>26*3600000)
+      throw Object.assign(new Error('Intervalo diario inválido.'),{status:400});
+    // Un solo snapshot: totales y cambios coinciden incluso si entra otra captura.
+    const [row]=await execute(`WITH readings AS (
+      SELECT id,recibido_en,conclusion,basura_promedio FROM mediciones
+      WHERE camara_id=$1 AND recibido_en>=to_timestamp($2::double precision/1000.0)
+      AND recibido_en<to_timestamp($3::double precision/1000.0)
+    ), hourly AS (
+      SELECT floor((extract(epoch FROM recibido_en)*1000-$2::double precision)/3600000)::integer AS index,
+        count(*)::integer AS total,
+        count(*) FILTER (WHERE conclusion='Hay basura')::integer AS trash,
+        count(*) FILTER (WHERE conclusion='Sin basura')::integer AS clear,
+        count(*) FILTER (WHERE conclusion='No seguro')::integer AS unsure
+      FROM readings GROUP BY 1
+    ), confirmed AS (
+      SELECT *,lag(conclusion) OVER (ORDER BY recibido_en,id) AS previous,
+        lag(recibido_en) OVER (ORDER BY recibido_en,id) AS previous_at
+      FROM readings WHERE conclusion IN ('Hay basura','Sin basura')
+    ), changes AS (
+      SELECT (extract(epoch FROM recibido_en)*1000)::double precision AS "receivedAt",conclusion,
+        CASE WHEN conclusion='Hay basura' THEN basura_promedio ELSE 1-basura_promedio END AS confidence
+      FROM confirmed WHERE previous IS DISTINCT FROM conclusion OR recibido_en-previous_at>interval '90 seconds'
+      ORDER BY recibido_en DESC,id DESC LIMIT 8
+    ) SELECT (SELECT jsonb_agg(to_jsonb(hourly) ORDER BY index) FROM hourly) AS bins,
+      (SELECT jsonb_agg(to_jsonb(changes) ORDER BY "receivedAt" DESC) FROM changes) AS events`,[CAMERA_ID,from,to]);
+    const bins=row?.bins??[],events=row?.events??[];
+    const totals=bins.reduce((sum,b)=>({total:sum.total+b.total,trash:sum.trash+b.trash,clear:sum.clear+b.clear,unsure:sum.unsure+b.unsure}),{total:0,trash:0,clear:0,unsure:0});
+    return {from,to,bins,totals,events};
+  }
+  return { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readDecisionTrends, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused };
 }
-export const { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused } = createStore(query);
+export const { readState, saveReading, readHistory, readChartHistory, readChartCoverage, readDecisionTrends, readCameraSettings, readCameraView, setOrientation, setCameraSettings, setCapturePaused } = createStore(query);
