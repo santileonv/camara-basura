@@ -1,34 +1,33 @@
 export function createAdminLive({get,document:doc,request,isAuthenticated,isBusy,onError,onPreviewChange=()=>{},page=globalThis.window,schedule=setTimeout,cancel=clearTimeout,now=Date.now}){
   let enabled=false,viewing=false,pending=false,timer,retryTimer,readyTimer,generation=0,deadline=0;
-  let attached=false,attachedAt=0,imageReady=false,roiReady=false,retryDelay=1000,sourceId=0;
-  const photo=get('livePhoto'),roiPhoto=get('roiLive');
+  let attached=false,attachedAt=0,roiReady=false,retryDelay=1000,sourceId=0;
+  const photo=get('roiLive');
   const notify=()=>onPreviewChange({active:viewing,ready:viewing&&roiReady});
   function render(){
     get('toggleLive').textContent=viewing?'Detener video':'Iniciar video';
     get('toggleLive').disabled=!enabled||pending||isBusy();
+    get('toggleLive').setAttribute('aria-pressed',String(viewing));
     photo.classList.toggle('rotated',get('cameraRotation').value==='180');
   }
   function clearStream(){
     cancel(readyTimer);
-    attached=false;imageReady=false;roiReady=false;
-    photo.removeAttribute('src');photo.hidden=true;get('liveEmpty').hidden=false;
-    roiPhoto.removeAttribute('src');notify();
+    attached=false;roiReady=false;
+    photo.removeAttribute('src');photo.hidden=true;notify();
   }
   function attach(){
     if(attached)return;
     attached=true;attachedAt=now();
     const src='/api/admin/live/stream?t='+now()+'&connection='+(++sourceId);
-    photo.setAttribute('src',src);roiPhoto.setAttribute('src',src);
+    photo.setAttribute('src',src);
     checkFrames();
   }
   function checkFrames(){
     if(!viewing||!attached)return;
     // Algunos navegadores no emiten load hasta que termina el MJPEG.
-    if(!imageReady&&photo.naturalWidth>0){imageReady=true;photo.hidden=false;get('liveEmpty').hidden=true;}
-    if(!roiReady&&roiPhoto.naturalWidth>0){roiReady=true;notify();}
-    if(!imageReady||!roiReady)readyTimer=schedule(checkFrames,250);
+    if(!roiReady&&photo.naturalWidth>0){roiReady=true;photo.hidden=false;notify();}
+    if(!roiReady)readyTimer=schedule(checkFrames,250);
   }
-  async function stop(remote=true,message='Video detenido. Puedes iniciarlo cuando necesites ajustar la posición.'){
+  async function stop(remote=true,message='Video detenido. Se muestra la última captura disponible.'){
     const wasViewing=viewing;viewing=false;pending=false;const expected=++generation;cancel(timer);cancel(retryTimer);clearStream();
     get('liveStatus').textContent=message;render();
     if(remote&&wasViewing&&isAuthenticated()){
@@ -38,8 +37,8 @@ export function createAdminLive({get,document:doc,request,isAuthenticated,isBusy
   }
   function status(data){
     if(data.frameAt&&now()-data.frameAt<8000){
-      photo.hidden=!imageReady;get('liveEmpty').hidden=imageReady;
-      get('liveStatus').textContent=`Video continuo · ${data.fps??0} fps recibidos. La zona de análisis también muestra este video.`;
+      photo.hidden=!roiReady;
+      get('liveStatus').textContent=`Video continuo · ${data.fps??0} fps recibidos. Ajusta la cámara y el recuadro para encuadrar.`;
     }else{
       get('liveStatus').textContent=data.device?.online&&data.device.protocol!==3?
         'La placa necesita el firmware de video continuo. Conserva tu config.h al actualizarla.':
@@ -93,12 +92,11 @@ export function createAdminLive({get,document:doc,request,isAuthenticated,isBusy
   });
   photo.addEventListener('load',()=>{
     if(!viewing||!attached)return;
-    imageReady=true;photo.hidden=false;get('liveEmpty').hidden=true;
-    get('liveStatus').textContent='Video continuo conectado. También puedes encuadrar en la zona de análisis.';
+    roiReady=true;photo.hidden=false;notify();
+    get('liveStatus').textContent='Video en vivo. Ajusta la posición de la cámara y la zona de análisis.';
   });
-  roiPhoto.addEventListener('load',()=>{if(viewing&&attached){roiReady=true;notify();}});
   const streamError=()=>{if(viewing&&attached){clearStream();reconnect();}};
-  photo.addEventListener('error',streamError);roiPhoto.addEventListener('error',streamError);
+  photo.addEventListener('error',streamError);
   // Mover entre pantallas puede provocar hidden/visible. No revocar la intención del usuario.
   const foreground=()=>{if(viewing&&enabled&&!doc.hidden)return synchronize(true);};
   doc.addEventListener('visibilitychange',foreground);
