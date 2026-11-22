@@ -10,17 +10,20 @@ import chartHistory from './api/chart-history.js';
 import chartCoverage from './api/chart-coverage.js';
 import cameraSettings from './api/camera-settings.js';
 import { adminHandlers } from './api/admin.js';
+import {livePreviewHandlers} from './api/live-preview.js';
+import {livePreview} from './lib/live-preview.js';
+import {attachDeviceVideo} from './lib/device-video.js';
 import {operationHandlers} from './api/operations.js';
 import {createAdminExportHandler} from './api/admin-export.js';
 import { validateAuthConfig } from './lib/auth.js';
 import { liveEvents } from './lib/live-events.js';
 
-let server, shutdownStarted = false;
+let server, deviceVideo, shutdownStarted = false;
 async function shutdown() {
   if (shutdownStarted) return; shutdownStarted = true;
   console.log('Cerrando servidor y conexiones PostgreSQL...');
   if (!server) { await closeDatabase(); return; }
-  server.drain(); liveEvents.close();
+  server.drain(); liveEvents.close(); livePreview.clear(); deviceVideo?.close();
   const timeout = setTimeout(() => { server.server.closeAllConnections(); process.exit(1); }, 25000); timeout.unref();
   await new Promise(resolve => server.server.close(resolve));
   await closeDatabase(); clearTimeout(timeout);
@@ -38,7 +41,11 @@ try {
   routes['/api/admin/operations']=operationHandlers.operations;
   routes['/api/device/control']=operationHandlers.control;
   routes['/api/admin/export']=createAdminExportHandler();
+  routes['/api/admin/live']=livePreviewHandlers.control;
+  routes['/api/admin/live/stream']=livePreviewHandlers.stream;
+  routes['/api/device/preview']=livePreviewHandlers.upload;
   server = createServer({ routes, health: () => query('SELECT 1') });
+  deviceVideo = attachDeviceVideo(server.server);
   await new Promise((resolve, reject) => { server.server.once('error', reject); server.server.listen(port, '0.0.0.0', resolve); });
   console.log('Servidor listo. Puerto ' + port + '. Modelo cargado y PostgreSQL conectado.');
   if (process.env.INGEST_PAUSED === 'true') console.log('Recepcion de capturas pausada por mantenimiento.');

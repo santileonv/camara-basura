@@ -3,9 +3,10 @@ import {cameraAuthorized} from '../lib/auth.js';
 import {body,reply,settings} from '../lib/config.js';
 import {readCameraSettings,setCapturePaused} from '../lib/store.js';
 import {liveEvents} from '../lib/live-events.js';
+import {livePreview} from '../lib/live-preview.js';
 import {deviceStatus} from '../lib/device-status.js';
 
-export function createOperationHandlers({auth=adminAuth,read=readCameraSettings,save=setCapturePaused,publish=liveEvents.publish,device=deviceStatus}={}){
+export function createOperationHandlers({auth=adminAuth,read=readCameraSettings,save=setCapturePaused,publish=liveEvents.publish,device=deviceStatus,preview=livePreview}={}){
   const normalize=camera=>({...camera,threshold:camera.threshold??settings().threshold});
   const snapshot=async()=>({camera:normalize(await read()),device:device.read(),maintenancePaused:process.env.INGEST_PAUSED==='true'});
   return {
@@ -28,10 +29,9 @@ export function createOperationHandlers({auth=adminAuth,read=readCameraSettings,
         if(!cameraAuthorized(req))return reply(res,401,{error:'Token de cámara incorrecto.'});
         device.note(req);const camera=await read(),paused=camera.paused||process.env.INGEST_PAUSED==='true';
         res.setHeader('Content-Type','text/plain; charset=utf-8');res.setHeader('Cache-Control','private, no-store');
-        // Compatibilidad con placas que ya cargaron el firmware de video retirado.
-        res.setHeader('X-Preview-Active','0');
-        const suffix=req.headers['x-control-protocol']==='2'?'IDLE\n':'';
-        res.statusCode=200;res.end(`${paused?'PAUSE':'RUN'}\n${camera.version}\n${suffix}`);
+        const protocol=req.headers['x-control-protocol'],live=protocol==='3'&&preview.active();res.setHeader('X-Preview-Active',live?'1':'0');
+        const extra=['2','3'].includes(protocol)?`${live?'PREVIEW':'IDLE'}\n`:'';
+        res.statusCode=200;res.end(`${paused?'PAUSE':'RUN'}\n${camera.version}\n${extra}`);
       }catch(e){reply(res,e.status||503,{error:'No se pudo consultar la orden de la cámara.'});}
     }
   };
