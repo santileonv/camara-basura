@@ -21,7 +21,7 @@ class Element {
 }
 const response=(data,status=200)=>({ok:status<300,status,json:async()=>data});
 test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y cierre de sesion',async(t)=>{
-  const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
+  const elements=new Map(),get=id=>{assert.ok(!['livePhoto','liveEmpty'].includes(id),'El visor superior fue eliminado');if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
   get('cameraRotation').value='180';get('thresholdPercent').value=get('thresholdSlider').value='80';
   let current={rotation:180,threshold:.8,version:'0',roi:{...DEFAULT_ROI}},conflict=false,expired=false;const calls=[];
   const decision={profile:'demo',windowSize:3,confirmationsRequired:2};
@@ -70,11 +70,11 @@ test('Panel: entrar, previsualizar sin guardar, guardar con CSRF, conflicto y ci
   const download=new URL(get('exportMeasurementsCSV').getAttribute('href'),'http://test');assert.equal(download.searchParams.get('format'),'csv');assert.equal(Number(download.searchParams.get('from')),new Date('2026-01-01T00:00:00').getTime());assert.equal(Number(download.searchParams.get('to')),new Date('2026-01-03T00:00:00').getTime());
   get('exportFrom').value='2026-01-03';await get('exportFrom').dispatch('change');assert.equal(get('exportMeasurementsCSV').getAttribute('href'),null);
   // El video bajo el recuadro conserva el borrador y no vuelve a la foto al consultar estado.
-  await get('toggleLive').dispatch('click');get('livePhoto').dispatch('load');get('roiLive').dispatch('load');
+  await get('toggleLive').dispatch('click');get('roiLive').dispatch('load');
   assert.equal(get('adminPhoto').hidden,true);assert.equal(get('roiLive').hidden,false);assert.equal(get('roiBox').hidden,false);
-  const stream=get('roiLive').src;assert.equal(stream,get('livePhoto').src);
+  const stream=get('roiLive').src;assert.match(stream,/^\/api\/admin\/live\/stream/);
   get('cameraRotation').value='180';await get('cameraRotation').dispatch('change');
-  assert.equal(get('roiLive').classList.contains('rotated'),true);assert.equal(get('livePhoto').classList.contains('rotated'),true);
+  assert.equal(get('roiLive').classList.contains('rotated'),true);
   get('roiSize').value='50';await get('roiSize').dispatch('input');const region={...get('roiBox').style};
   await vm.runInContext('preview()',context);
   assert.equal(get('adminPhoto').hidden,true);assert.equal(get('roiLive').src,stream);assert.equal(get('roiLive').hidden,false);
