@@ -189,7 +189,9 @@ El envío antiguo de una imagen por petición HTTPS quedó retirado. Los cuadros
 
 Para posicionar con la mayor fluidez, pulsa **Pausar capturas y análisis**, inicia el video, ajusta la posición, detén el video y reanuda la detección. Los controles son independientes: el video no cambia la pausa persistente. Con la detección activa, sus envíos siguen teniendo prioridad y pueden interrumpir brevemente el movimiento. Cada captura de análisis conserva **800×600 y calidad JPEG 12**; el sensor vuelve a esos ajustes y vacía los cuadros del tamaño anterior antes de enviar la medición. El giro elegido en el formulario se refleja en el video; **Guardar cambios** lo aplica al análisis.
 
-El video está apagado por defecto. Activarlo requiere una sesión administrativa, origen y CSRF válidos. La autorización se renueva cada 5 segundos, vence tras 15 segundos sin renovación y tiene un máximo de 5 minutos. Ocultar o cerrar la pestaña, cerrar sesión o pulsar **Detener video** corta la vista y la conexión de la placa. Volver a la pestaña no la activa automáticamente.
+Mientras el video está activo, el apartado **Zona que analizará el modelo** muestra esa misma transmisión privada bajo el recuadro. El servidor distribuye los cuadros del mismo enlace de la XIAO; no se crea otro envío desde la placa. El recuadro y sus controles conservan el borrador de la zona y el giro seleccionados. Las consultas de la última medición no sustituyen el video por una foto, aunque la detección esté pausada. Al detener el video vuelve a mostrarse la última captura disponible, sin descartar los ajustes sin guardar. El diseño se adapta al tamaño de la ventana sin reiniciar el enlace.
+
+El video está apagado por defecto. Activarlo requiere una sesión administrativa, origen y CSRF válidos. La autorización se renueva cada 5 segundos, vence tras 15 segundos sin renovación y tiene un máximo de 5 minutos. Mover la ventana entre pantallas o cambiar de pestaña no revoca el video que el usuario inició. Se mantiene la renovación mientras el navegador lo permita. Si la conexión o la autorización temporal se pierden, al volver a la ventana se reconecta automáticamente dentro del límite original de cinco minutos, sin quitarle el control a otra sesión. Cerrar la página, cerrar sesión o pulsar **Detener video** sí lo detienen; una vista detenida manualmente no se vuelve a activar sola.
 
 La placa usa el protocolo de control **3**, verifica el certificado TLS con `certificados.h` y se conecta de forma saliente a `/api/device/video` con `CAMERA_TOKEN` en una cabecera. No hay puertos locales abiertos ni claves en el navegador. Una conexión de placa por instancia; máximo 200 000 bytes por cuadro. Las órdenes de pausa y versión de configuración viajan también por WSS y la placa confirma su aplicación. El servidor no ejecuta el modelo ni guarda fotos o mediciones de video en PostgreSQL; tampoco las envía al monitor público.
 
@@ -277,7 +279,7 @@ Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**.
 | `public/admin-tools.js` | Controles de operación y exportación del administrador |
 | `lib/live-preview.js` / `api/live-preview.js` | Autorización temporal y transmisión MJPEG privada en RAM |
 | `lib/device-video.js` | Enlace WSS continuo autenticado, límites, créditos y órdenes de control |
-| `public/admin-live.js` | Inicio y cierre del video de posicionamiento, con detención al ocultar la pestaña |
+| `public/admin-live.js` | Video y encuadre en vivo, renovación y reconexión al cambiar de pantalla |
 | `api/camera-settings.js` | Ruta pública de ajuste retirada; devuelve 410. Los cambios se hacen por /api/admin/settings |
 | `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
 | `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
@@ -305,7 +307,7 @@ npm run dev
 
 Abre `http://localhost:3000`. Para producción mantén `NODE_ENV=production` y HTTPS. El monitor público no necesita cookies ni clave de consulta.
 
-Las pruebas de video comprueban autenticación, CSRF, caducidad, revocación, límites de tamaño y frecuencia, una secuencia de 24 cuadros reales sobre un solo enlace, recepción MJPEG privada, cambios de pausa por WSS, protocolos compatibles y cierre al ocultar la pestaña. La prueba de secuencia simula la placa; no mide sus fps físicos ni su WiFi.
+Las pruebas de video comprueban autenticación, CSRF, caducidad, revocación, límites de tamaño y frecuencia, una secuencia de 24 cuadros reales sobre un solo enlace, recepción MJPEG privada, cambios de pausa por WSS, protocolos compatibles y cierre al salir de la página. Las pruebas de interfaz comprueban además visibilidad, foco, reconexión, límite original de cinco minutos y video bajo el recuadro sin perder el borrador. La prueba de secuencia simula la placa; no mide sus fps físicos ni su WiFi.
 
 Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, orientación fija, rutas públicas de modificación y exportación retiradas, pausa y reanudación privadas, carreras de pausa durante el análisis y el commit, exportación privada por lotes con BIGINT y filtros de fechas, revocación de descargas, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
 
