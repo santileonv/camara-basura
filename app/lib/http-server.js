@@ -12,6 +12,10 @@ const FILES = {
   '/admin.js': ['admin.js', 'application/javascript'], '/admin-live.js':['admin-live.js','application/javascript'], '/admin-tools.js':['admin-tools.js','application/javascript'], '/admin.css': ['admin.css', 'text/css'],
   '/roi-geometry.js':['roi-geometry.js','application/javascript'], '/roi-editor.js':['roi-editor.js','application/javascript'],
   '/decision-progress.js':['decision-progress.js','application/javascript'],
+  '/dashboard-data.js':['dashboard-data.js','application/javascript'],
+  '/dashboard-live.js':['dashboard-live.js','application/javascript'],
+  '/decision-trends.js':['decision-trends.js','application/javascript'],
+  '/dashboard.css':['dashboard.css','text/css'],
   '/style.css': ['style.css', 'text/css'], '/history.css': ['history.css', 'text/css'],
   '/theme.js':['theme.js','application/javascript']
 };

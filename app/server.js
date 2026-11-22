@@ -8,6 +8,7 @@ import state from './api/state.js';
 import history from './api/history.js';
 import chartHistory from './api/chart-history.js';
 import chartCoverage from './api/chart-coverage.js';
+import decisionTrends from './api/decision-trends.js';
 import cameraSettings from './api/camera-settings.js';
 import { adminHandlers } from './api/admin.js';
 import {livePreviewHandlers} from './api/live-preview.js';
@@ -41,6 +42,7 @@ try {
   routes['/api/admin/operations']=operationHandlers.operations;
   routes['/api/device/control']=operationHandlers.control;
   routes['/api/admin/export']=createAdminExportHandler();
+  routes['/api/decision-trends']=decisionTrends;
   routes['/api/admin/live']=livePreviewHandlers.control;
   routes['/api/admin/live/stream']=livePreviewHandlers.stream;
   routes['/api/device/preview']=livePreviewHandlers.upload;
