@@ -1,9 +1,11 @@
 import {DEFAULT_ROI,sameRoi} from './roi-geometry.js';
 import {createRoiEditor} from './roi-editor.js';
+import {createAdminLive} from './admin-live.js';
 import {createAdminTools} from './admin-tools.js';
 const $ = id => document.getElementById(id);
 let csrfToken = null, camera = null, latest = null, authenticated = false, busy = false, timer;
 const adminTools=createAdminTools({get:$,document,request,getCamera:()=>camera,isAuthenticated:()=>authenticated,isBusy:()=>busy,onBusy:setBusy,onCamera:next=>{camera=next;renderDraft();},onError:message=>{$('adminError').textContent=message;}});
+const adminLive=createAdminLive({get:$,document,request,isAuthenticated:()=>authenticated,isBusy:()=>busy,onError:message=>{$('adminError').textContent=message;}});
 const percent = value => `${Math.round(value * 100)} %`;
 const imageSize=()=>({width:latest?.imageWidth || $('adminPhoto').naturalWidth || 800,height:latest?.imageHeight || $('adminPhoto').naturalHeight || 600});
 const roiEditor=createRoiEditor({stage:$('roiStage'),box:$('roiBox'),handle:$('roiHandle'),sizeInput:$('roiSize'),xInput:$('roiX'),yInput:$('roiY'),reset:$('resetRoi'),
@@ -12,10 +14,10 @@ function setSession(data) {
   authenticated = !!data.authenticated; csrfToken = data.csrfToken || null;
   $('loginPanel').hidden = authenticated; $('adminPanel').hidden = !authenticated;
   if (!authenticated) {
-    clearTimeout(timer); adminTools.stop(); camera = null; latest = null; $('adminPhoto').removeAttribute('src');
+    clearTimeout(timer); adminTools.stop(); adminLive.disable(); camera = null; latest = null; $('adminPhoto').removeAttribute('src');
     roiEditor.setAvailable(false);
     $('adminStatus').textContent = data.configured === false ? 'El administrador todavía no está configurado en el servidor.' : 'Inicia sesión para cambiar los ajustes.';
-  } else $('adminStatus').textContent = 'Solo tu sesión puede guardar cambios. El monitor público sigue disponible.';
+  } else {adminLive.enable();$('adminStatus').textContent = 'Solo tu sesión puede guardar cambios. El monitor público sigue disponible.';}
 }
 async function request(path, options = {}) {
   const mutation = options.method && options.method !== 'GET';
@@ -32,9 +34,10 @@ function setBusy(value) {
   busy=value; $('loginButton').disabled=value; $('logoutButton').disabled=value;
   $('reloadSettings').disabled=value; $('cameraRotation').disabled=value;
   $('thresholdPercent').disabled=value; $('thresholdSlider').disabled=value; renderDraft();
-  roiEditor.render();adminTools.render();
+  roiEditor.render();adminTools.render();adminLive.render();
 }
 function renderDraft() {
+  adminLive.render();
   const threshold = Number($('thresholdPercent').value), rotation = Number($('cameraRotation').value);
   const valid = $('thresholdPercent').value.trim() !== '' && Number.isInteger(threshold) && threshold >= 60 && threshold <= 95;
   const roi=roiEditor.get();

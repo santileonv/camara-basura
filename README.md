@@ -4,7 +4,7 @@ Versión 3.2.0 · TALLER DISEÑO · 20 de noviembre de 2026.
 
 La XIAO envía fotos por Internet al servidor de Railway. El servidor analiza cada imagen con el modelo de Teachable Machine, suma las probabilidades de residuos y guarda los resultados en PostgreSQL. El monitor es público y se puede abrir desde cualquier red, sin clave de consulta. La detección continúa con el navegador cerrado mientras la cámara, el servidor y la base estén encendidos.
 
-La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; estos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas públicas siguen retiradas. Solo el administrador puede exportar JSON/CSV y pausar o reanudar. Los ajustes de giro, zona y exigencia no requieren cargar firmware; detener también las capturas físicas requiere el firmware de control descrito más abajo.
+La cámara comienza girada 180°. El panel privado `/admin` permite elegir 0° o 180° y cambiar la exigencia de decisión; estos ajustes se guardan en PostgreSQL y se aplican al análisis y al monitor público. Conserva la conexión TLS con CA de Aiven. Las descargas públicas siguen retiradas. Solo el administrador puede exportar JSON/CSV, pausar o reanudar la detección y activar video en vivo para posicionar la cámara. Los ajustes de giro, zona y exigencia no requieren cargar firmware; detener también las capturas físicas requiere el firmware de control descrito más abajo.
 
 **Estado del proyecto al 20 de noviembre:** el servicio `xiao-monitor` está conectado al repositorio `santileonv/camara-basura`, rama `main`, raíz `/app`. La migración a Aiven se completó: las 119 mediciones originales coincidieron en todos sus campos al comparar las exportaciones, se comprobaron capturas nuevas en Aiven y el usuario confirmó que el sistema funciona con el PostgreSQL antiguo de Railway apagado. Los apartados de instalación y copia siguientes sirven como referencia para reproducir el proceso; no se debe repetir la copia sobre la base que ya contiene datos.
 
@@ -177,9 +177,23 @@ Si no existe historial y quieres empezar vacío, omite la copia y configura dire
 
 En `/admin`, el botón **Pausar capturas y análisis** guarda la orden en `camaras.capturas_pausadas`. Es persistente: reiniciar Railway o volver a desplegar no reanuda la cámara. Solo el administrador autenticado puede cambiarla mediante `PUT /api/admin/operations`, protegido por origen, CSRF y versión de configuración. No borra mediciones. Una foto que ya estaba en análisis no puede guardarse después de la pausa; la versión se verifica otra vez en la escritura SQL. Al reanudar, la siguiente captura inicia una ventana de decisión nueva.
 
-**Actualizar una vez la XIAO:** copia `XIAO_Remota.ino`, `capture-schedule.h` y `certificados.h` desde `firmware/XIAO_Remota`, conserva tu `config.h` privado y vuelve a cargar la placa. El firmware consulta `/api/device/control` por HTTPS con `CAMERA_TOKEN` antes de capturar al arrancar. En marcha recibe la orden junto a la respuesta del envío; puede haber una foto ya en tránsito, que el servidor descarta sin analizar. Al pausar desinicializa el controlador de cámara, no pide más cuadros ni envía imágenes, y consulta la orden cada 3 segundos. Al continuar inicializa de nuevo la cámara y retoma la cadencia de demo. No almacena fotos atrasadas. Ante un error de control espera sin capturar hasta recibir una orden válida. La interfaz muestra si la placa confirmó la orden o todavía necesita el firmware nuevo.
+**Actualizar una vez la XIAO:** copia `XIAO_Remota.ino`, `capture-schedule.h` y `certificados.h` desde `firmware/XIAO_Remota`, conserva tu `config.h` privado y vuelve a cargar la placa. El firmware consulta `/api/device/control` por HTTPS con `CAMERA_TOKEN` antes de capturar al arrancar. En marcha recibe la orden junto a la respuesta del envío; puede haber una foto ya en tránsito, que el servidor descarta sin analizar. Al pausar deja de tomar y enviar las fotos de análisis y consulta la orden cada 3 segundos. Si la vista en vivo también está detenida, desinicializa el controlador de cámara. Si el administrador activó la vista en vivo, solo continúa enviando los cuadros privados de posicionamiento. Al continuar inicializa de nuevo la cámara y retoma la cadencia de demo. No almacena fotos atrasadas. Ante un error de control espera sin capturar hasta recibir una orden válida. La interfaz muestra si la placa confirmó la orden o todavía necesita el firmware nuevo.
 
-Con firmware anterior la pausa del **servidor** funciona: las fotos recibidas no se analizan ni guardan. La toma y el envío físicos solo se detienen con el firmware actualizado. La variable de mantenimiento `INGEST_PAUSED=true`, si estuviera configurada, prevalece y debe retirarse en Railway para reanudar. No se añadió video en vivo.
+Con firmware anterior la pausa del **servidor** funciona: las fotos recibidas no se analizan ni guardan. La toma y el envío físicos solo se detienen con el firmware actualizado. La variable de mantenimiento `INGEST_PAUSED=true`, si estuviera configurada, prevalece y debe retirarse en Railway para reanudar. La vista en vivo privada se controla por separado, como se describe a continuación.
+
+## Video en vivo privado para posicionar la cámara
+
+En `/admin`, **Iniciar video** abre una vista MJPEG de la XIAO de hasta 2 imágenes por segundo. La frecuencia real depende del WiFi, la latencia y los envíos de análisis; no se promete video de 30 fps. Usa **Detener video** cuando termines de orientar el dispositivo. El giro seleccionado en el formulario se refleja inmediatamente en esta vista; **Guardar cambios** lo aplica al análisis. La foto y la edición de la zona conservan su funcionamiento anterior.
+
+La vista es independiente de la pausa persistente: puedes pausar las fotos de análisis y utilizar el video para acomodar la cámara sin añadir mediciones. Para detener toda toma y envío de imágenes, pausa la detección y detén el video. Cuando la detección está activa, sus envíos tienen prioridad y mantienen el objetivo de 5 segundos, sujeto al tiempo real de red. No se modifica la resolución SVGA ni la calidad JPEG de análisis. La placa utiliza una sola conexión TLS a la vez; reutiliza la conexión de cuadros privados entre las consultas y los envíos de análisis.
+
+El video está apagado por defecto. Su activación requiere una sesión de administrador y `PUT /api/admin/live` con origen y CSRF válidos. El navegador renueva la autorización cada 5 segundos; expira a los 15 segundos sin renovación y tiene un máximo de 5 minutos por activación. Ocultar o cerrar la pestaña y cerrar sesión detienen la vista; si no llega la orden de cierre, vence la autorización. Volver a la pestaña no vuelve a activar el video automáticamente. Solo una sesión puede controlar la vista a la vez.
+
+La XIAO realiza conexiones HTTPS salientes a Railway: no necesita abrir puertos ni compartir la contraseña WiFi, el token de cámara o la IP local con el navegador. El firmware nuevo usa el protocolo de control 2 (`RUN`/`PAUSE`, versión y `PREVIEW`/`IDLE`); los firmwares de pausa anteriores siguen recibiendo su respuesta de dos líneas. Las imágenes viajan a `/api/device/preview` con `CAMERA_TOKEN`. El servidor conserva solo el último cuadro en RAM, limita el tamaño a 500 000 bytes y la frecuencia de recepción, y descarta las imágenes al detener o vencer la vista. No ejecuta el modelo, no escribe imágenes o mediciones en PostgreSQL y no notifica estos cuadros al monitor público.
+
+`/api/admin/live/stream` exige una sesión administrativa vigente, usa cookies privadas y no incluye claves en la URL. Verifica la sesión en cada cuadro y cierra una transmisión revocada. La vista, sus controles y sus imágenes no están disponibles para visitantes del monitor público. El servidor limita los espectadores y descarta cuadros de clientes lentos en lugar de acumularlos.
+
+**Instalación:** primero despliega esta versión web. Después carga una sola vez el firmware de `firmware/XIAO_Remota`, conservando tu `config.h`. Incluye la pausa remota y el video: no es necesario cargar dos programas. El ZIP de entrega incluye `.ino`, `capture-schedule.h`, `certificados.h` y `config.example.h`; la plantilla no reemplaza tus valores privados. En Arduino IDE selecciona **XIAO_ESP32S3**, **OPI PSRAM** y **USB CDC habilitado**.
 
 ## 4. Administrar la base y descargar los datos
 
@@ -239,7 +253,7 @@ La barra principal muestra la confianza estimada en la conclusión confirmada: e
 
 Con evidencia consistente, la primera conclusion llega en la cuarta captura en demo y en la quinta en stable. Un reinicio de la camara, un corte largo, un cambio de perfil, de zona, de giro o de umbral reinician la ventana de confirmacion. Refrescar la web no añade mediciones.
 
-En demo el objetivo es un ciclo completo de **5 segundos**, incluyendo el trabajo y la espera restante. Si el trabajo supera ese tiempo, el siguiente ciclo comienza al terminar, sin solapamientos. Con DEMO_MODE=false se restaura la pausa de **15 segundos despues de terminar cada envio**. No se transmite video continuo. Si un envío falla, la cámara espera al menos 30 segundos antes de otra captura; no almacena una cola de fotos perdidas durante un corte.
+En demo el objetivo es un ciclo completo de **5 segundos**, incluyendo el trabajo y la espera restante. Si el trabajo supera ese tiempo, el siguiente ciclo comienza al terminar, sin solapamientos. Con DEMO_MODE=false se restaura la pausa de **15 segundos despues de terminar cada envio**. El video de posicionamiento solo se transmite cuando el administrador lo activa; permanece apagado durante el uso habitual. Si un envío falla, la cámara espera al menos 30 segundos antes de otra captura; no almacena una cola de fotos perdidas durante un corte.
 
 Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**. El historial anterior sigue disponible. Los porcentajes son puntuaciones de clasificación; no expresan volumen, cantidad de objetos ni una medición física de basura.
 
@@ -252,6 +266,8 @@ Si pasan 90 segundos sin una lectura, el monitor indica **Sin datos recientes**.
 | `api/admin-export.js` / `lib/database-export.js` | Exportación JSON/CSV privada y por lotes |
 | `api/operations.js` / `lib/device-status.js` | Pausa persistente y confirmación de la placa |
 | `public/admin-tools.js` | Controles de operación y exportación del administrador |
+| `lib/live-preview.js` / `api/live-preview.js` | Autorización temporal, recepción privada y transmisión MJPEG en RAM |
+| `public/admin-live.js` | Inicio y cierre del video de posicionamiento, con detención al ocultar la pestaña |
 | `api/camera-settings.js` | Ruta pública de ajuste retirada; devuelve 410. Los cambios se hacen por /api/admin/settings |
 | `lib/database.js` | Pool de cinco conexiones y verificación TLS con CA para Aiven |
 | `scripts/copy-to-aiven.js` | Copia única del PostgreSQL actual al destino Aiven |
@@ -278,6 +294,8 @@ npm run dev
 ```
 
 Abre `http://localhost:3000`. Para producción mantén `NODE_ENV=production` y HTTPS. El monitor público no necesita cookies ni clave de consulta.
+
+Las pruebas de video comprueban autenticación, CSRF, caducidad, revocación, límites de tamaño y frecuencia, transmisión de un JPEG real, protocolo compatible y cierre de la interfaz al ocultar la pestaña. La compilación no sustituye la prueba de la cámara física ni mide su frecuencia real.
 
 Las pruebas usan PostgreSQL compilado a WebAssembly mediante PGlite: no necesitan tus credenciales ni escriben en tus bases de nube. Incluyen ejecución real del modelo con un JPEG sintético, recorrido HTTP, consulta pública, orientación fija, rutas públicas de modificación y exportación retiradas, pausa y reanudación privadas, carreras de pausa durante el análisis y el commit, exportación privada por lotes con BIGINT y filtros de fechas, revocación de descargas, registro atómico, duplicados, paginación, copia de más de 250 registros y reversión ante fallos. La imagen sintética comprueba ejecución; no mide la precisión con basura real.
 
