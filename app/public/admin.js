@@ -4,8 +4,9 @@ import {createAdminLive} from './admin-live.js';
 import {createAdminTools} from './admin-tools.js';
 const $ = id => document.getElementById(id);
 let csrfToken = null, camera = null, latest = null, authenticated = false, busy = false, timer;
+let livePreview={active:false,ready:false};
 const adminTools=createAdminTools({get:$,document,request,getCamera:()=>camera,isAuthenticated:()=>authenticated,isBusy:()=>busy,onBusy:setBusy,onCamera:next=>{camera=next;renderDraft();},onError:message=>{$('adminError').textContent=message;}});
-const adminLive=createAdminLive({get:$,document,request,isAuthenticated:()=>authenticated,isBusy:()=>busy,onError:message=>{$('adminError').textContent=message;}});
+const adminLive=createAdminLive({get:$,document,request,isAuthenticated:()=>authenticated,isBusy:()=>busy,onPreviewChange:state=>{livePreview=state;renderPreview();},onError:message=>{$('adminError').textContent=message;}});
 const percent = value => `${Math.round(value * 100)} %`;
 const imageSize=()=>({width:latest?.imageWidth || $('adminPhoto').naturalWidth || 800,height:latest?.imageHeight || $('adminPhoto').naturalHeight || 600});
 const roiEditor=createRoiEditor({stage:$('roiStage'),box:$('roiBox'),handle:$('roiHandle'),sizeInput:$('roiSize'),xInput:$('roiX'),yInput:$('roiY'),reset:$('resetRoi'),
@@ -26,7 +27,7 @@ async function request(path, options = {}) {
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401 && path !== 'login') setSession({authenticated:false});
-    throw new Error(data.error || 'No se pudo completar la solicitud.');
+    throw Object.assign(new Error(data.error || 'No se pudo completar la solicitud.'),{status:response.status});
   }
   return data;
 }
@@ -46,10 +47,27 @@ function renderDraft() {
   $('trashLimit').textContent=valid ? threshold + ' %' : '—'; $('clearLimit').textContent=valid ? (100-threshold) + ' %' : '—';
   $('saveSettings').disabled=busy || !valid || !dirty;
   $('draftStatus').textContent=!valid ? 'Elige una exigencia entera entre 60 y 95 %.' : dirty ? 'Tienes cambios sin guardar. La vista previa todavía no cambia el análisis.' : 'No hay cambios pendientes.';
-  if (latest?.preview) {
+  renderPreview();
+}
+function renderPreview(){
+  const rotation=Number($('cameraRotation').value);
+  $('roiLive').classList.toggle('rotated',rotation===180);
+  $('roiLive').hidden=!(authenticated&&livePreview.active&&livePreview.ready);
+  if(authenticated&&livePreview.active){
+    $('adminPhoto').hidden=true;$('adminPhotoEmpty').hidden=livePreview.ready;
+    $('adminPhotoEmpty').textContent='Conectando el video para encuadrar…';
+    $('previewStatus').textContent=livePreview.ready?'Video en vivo · mueve la cámara y ajusta el recuadro. El giro y la zona se aplican al guardar cambios.':'Esperando el video en vivo para encuadrar. La detección puede permanecer pausada.';
+    roiEditor.setAvailable(livePreview.ready);
+  }else if (authenticated&&latest?.preview) {
+    const src='data:image/jpeg;base64,'+latest.preview;
+    if($('adminPhoto').getAttribute('src')!==src)$('adminPhoto').src=src;
     $('adminPhoto').hidden=false; $('adminPhotoEmpty').hidden=true;
     $('adminPhoto').classList.toggle('rotated',rotation !== (latest.rotation ?? 0));
     $('previewStatus').textContent='Vista previa del giro y la zona seleccionados · captura del ' + new Date(latest.receivedAt).toLocaleString('es-CL');
+    roiEditor.setAvailable(true);
+  }else{
+    $('adminPhoto').hidden=true;$('adminPhotoEmpty').hidden=false;$('adminPhotoEmpty').textContent='Todavía no hay una captura.';
+    $('previewStatus').textContent='Todavía no hay una captura.';roiEditor.setAvailable(false);
   }
 }
 function applyConfiguration(data) {
@@ -69,16 +87,8 @@ async function preview() {
     const data=await response.json();
     if (!authenticated) return;
     latest=data.state;
-    if(latest?.preview) {
-      const src='data:image/jpeg;base64,'+latest.preview;
-      if($('adminPhoto').getAttribute('src')!==src)$('adminPhoto').src=src;
-      roiEditor.setAvailable(true);
-    }else{
-      $('adminPhoto').hidden=true;$('adminPhotoEmpty').hidden=false;$('previewStatus').textContent='Todavía no hay una captura.';
-      roiEditor.setAvailable(false);
-    }
     renderDraft();
-  }catch{if(authenticated)$('previewStatus').textContent='No se pudo actualizar la vista previa. Se volverá a intentar.';}
+  }catch{if(authenticated&&!livePreview.active)$('previewStatus').textContent='No se pudo actualizar la vista previa. Se volverá a intentar.';}
   finally{if(authenticated&&!document.hidden)timer=setTimeout(preview,5000);}
 }
 $('loginForm').addEventListener('submit',async event=>{
